@@ -976,6 +976,9 @@ public class ReportDetailQueryService {
                               new DiaryCaregiverQuestionResponse(
                                   question.getQuestion(),
                                   question.getPurpose(),
+                                  question.getConnectionType(),
+                                  question.getResponseGuide(),
+                                  question.getCoRegulationAction(),
                                   refs.getOrDefault(
                                       diaryRefKey(
                                           ReportDiaryEvidenceRef.OWNER_CAREGIVER_QUESTION,

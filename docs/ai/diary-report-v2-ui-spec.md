@@ -115,25 +115,41 @@
 
 `근거가 어느 정도 있어요` 같은 모호한 배지는 사용하지 않는다.
 
-### 2.6 보호자가 이어 갈 대화
+### 2.6 오늘 마음 나누기
 
 데이터:
 
 - `diaryInsights.caregiverQuestions`
 - `diaryInsights.listeningTip`
 
-질문 0~2개를 큰 버튼형 카드로 표시한다.
+정서적 교감 전용 섹션이다. 부모가 아이와 **마음을 나누는 시간**으로 안내한다. 무엇을 물을지(질문)와 아이 답에 어떻게 반응할지(공감 반응)를 한 카드로 함께 준다.
 
-예시:
+섹션 제목: **오늘 마음 나누기**
+인트로 문구 예시:
 
-- `100점을 받고 엄마에게 자랑할 때 어떤 말을 했어?`
-- `엄마가 잘했다고 말해줬을 때 어떤 말이 제일 좋았어?`
+> 아이 마음을 함께 들여다보는 시간이에요.
 
-듣는 태도 예시:
+카드 0~2개를 세로로 쌓는다. 각 카드 레이아웃:
+
+| 줄 | 아이콘 | 데이터 | 역할 |
+|---|---|---|---|
+| 질문 | 💬 | `question` | 부모가 아이에게 그대로 물어볼 감정 앵커 질문 |
+| 공감 반응 | 🤍 | `responseGuide` | 아이 답에 부모가 어떻게 마음으로 반응할지(반영적 경청) |
+| 함께 해보기 | 🎨 | `coRegulationAction` | 있을 때만 표시. `null`이면 그 줄만 숨김 |
+
+`connectionType`은 카드 강조색·라벨 힌트로만 쓰고, enum 문자열을 화면에 그대로 노출하지 않는다.
+
+예시(FEELING_SHARING):
+
+> 💬 그때 네 마음은 어땠어?
+> 🤍 아이가 말하면 먼저 "그랬구나, 그런 마음이었구나" 하고 마음을 그대로 받아 주세요. 옳고 그름을 판단하거나 해결책을 주기보다, 그 마음을 함께 느껴 주는 것으로 충분해요.
+> 🎨 그때 마음을 색이나 표정으로 같이 그려 볼까요?
+
+`listeningTip`은 섹션 인트로 아래 보조 문구로 유지한다.
 
 > 점수만 되풀이하기보다 아이가 자랑하고 싶었던 마음과 엄마의 반응을 함께 들어주세요.
 
-질문이 없으면 영역 전체를 숨긴다. 일반적인 육아 문구로 억지로 채우지 않는다.
+`responseGuide`·`coRegulationAction`은 서버가 준 문구를 그대로 노출한다 — 클라이언트가 생성·요약·재작성하지 않는다.
 
 ### 2.7 상세 기록
 
@@ -168,7 +184,8 @@
 - `diaryInsights == null`: 기존 리포트 화면으로 폴백
 - `storySnapshot == null`: 핵심 이야기 카드 대신 `이번 활동의 대화를 충분히 정리할 근거가 아직 적어요` 한 줄 표시 후 상세 기록만 제공
 - `sessionObservations == []`: 해당 섹션 숨김
-- `caregiverQuestions == []`이고 `listeningTip == null`: 보호자 대화 영역 숨김
+- `caregiverQuestions`: 서버가 빈 상태에서 `GENERAL_CONNECTION` 기본 교감 카드 1개를 항상 채워 보낸다(다른 실컨텐츠가 있는 한 `diaryInsights`가 살아 있으면 이 배열은 비지 않는다). 따라서 FE는 별도 빈 상태 분기 없이 받은 카드를 그대로 그린다. `diaryInsights == null`이면 이 섹션도 레거시 폴백으로 함께 사라진다
+- `listeningTip == null`: 인트로 아래 보조 문구만 생략(섹션은 유지)
 - `childVoiceItems == []`: 직접 표현 영역 숨김
 - `narrativeFlow`가 1개 이하: 타임라인 대신 핵심 이야기 카드에 통합
 
@@ -178,7 +195,7 @@
 
 - 파랑: 그림과 실제 이야기
 - 보라: 이번 활동에서 확인된 표현
-- 초록: 보호자가 이어 갈 대화
+- 초록: 오늘 마음 나누기(정서적 교감)
 - 회색: 상세 기록·기술 정보
 
 원칙:
@@ -259,7 +276,7 @@
 | 타임라인 | `diaryInsights.narrativeFlow` |
 | 아이 직접 표현 | `diaryInsights.childVoiceItems` |
 | 이번 활동 표현 | `diaryInsights.sessionObservations` |
-| 보호자 질문 | `diaryInsights.caregiverQuestions` |
-| 듣는 태도 | `diaryInsights.listeningTip` |
+| 오늘 마음 나누기(질문·공감 반응·함께 해보기) | `diaryInsights.caregiverQuestions[].{question,responseGuide,coRegulationAction,connectionType}` |
+| 듣는 태도(보조) | `diaryInsights.listeningTip` |
 | 근거 구성 상세 | `diaryInsights.dataQuality` |
 | 레거시 폴백 | 기존 `observationDraft`, `conversationSummary`, `subjectReports` |

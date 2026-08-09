@@ -162,6 +162,7 @@ def _signals(**overrides):
         "caregiverQuestions": [
             {
                 "question": "100점을 받고 엄마에게 자랑할 때 어떤 말을 했어?",
+                "connectionType": "SHARED_JOY",
                 "purpose": "자랑한 장면을 아이 말로 더 구체적으로 들어보기",
                 "evidenceRefs": [_ref("QA_ANSWER", "101")],
             }
@@ -355,6 +356,7 @@ class DiaryReportBuilderTest(unittest.TestCase):
             caregiverQuestions=[
                 {
                     "question": "근거 없는 질문이야?",
+                    "connectionType": "FEELING_SHARING",
                     "purpose": "없음",
                     "evidenceRefs": [_ref("QA_ANSWER", "999")],
                 }
@@ -366,7 +368,13 @@ class DiaryReportBuilderTest(unittest.TestCase):
 
         self.assertIsNone(insights.story_snapshot)
         self.assertEqual(insights.narrative_flow, [])
-        self.assertEqual(insights.caregiver_questions, [])
+        # 근거가 없는 LLM 질문은 버려진다. 남는 것은 근거를 요구하지 않는 GENERAL 기본 교감 카드뿐이라,
+        #   근거 없는 주장이 카드로 새지 않음을 보인다.
+        self.assertEqual(len(insights.caregiver_questions), 1)
+        fallback = insights.caregiver_questions[0]
+        self.assertEqual(fallback.connection_type, "GENERAL_CONNECTION")
+        self.assertEqual(fallback.evidence_refs, [])
+        self.assertNotIn("근거 없는", fallback.question)
 
     def test_session_observation_requires_two_independent_refs(self):
         import diary_report_v2
@@ -940,6 +948,139 @@ def _generation_payload() -> str:
 
 
 
+class DiaryCaregiverConnectionTest(unittest.TestCase):
+    """"오늘 마음 나누기" 교감 카드 조립 규칙."""
+
+    def _question(self, connection_type, question="이 그림에서 그때 마음이 어땠어?", ref="101"):
+        return {
+            "question": question,
+            "connectionType": connection_type,
+            "purpose": "마음을 함께 나눠 보기",
+            "evidenceRefs": [_ref("QA_ANSWER", ref)],
+        }
+
+    def test_attaches_static_response_guide_and_co_regulation_by_type(self):
+        import diary_report_v2
+
+        raw = _signals(caregiverQuestions=[self._question("FEELING_SHARING")])
+        insights = diary_report_v2.build_diary_insights(
+            raw, _diary_request(), vision_available=True
+        )
+
+        self.assertEqual(len(insights.caregiver_questions), 1)
+        card = insights.caregiver_questions[0]
+        self.assertEqual(card.connection_type, "FEELING_SHARING")
+        expected_guide, expected_action = diary_report_v2._CONNECTION_STATIC["FEELING_SHARING"]
+        self.assertEqual(card.response_guide, expected_guide)
+        self.assertEqual(card.co_regulation_action, expected_action)
+
+    def test_llm_supplied_guide_is_ignored_and_overwritten_by_server(self):
+        import diary_report_v2
+
+        item = self._question("COMFORT_SEEKING")
+        item["responseGuide"] = "모델이 지어낸 공감 문구"
+        item["coRegulationAction"] = "모델이 지어낸 함께 해보기"
+        raw = _signals(caregiverQuestions=[item])
+        insights = diary_report_v2.build_diary_insights(
+            raw, _diary_request(), vision_available=True
+        )
+
+        card = insights.caregiver_questions[0]
+        self.assertNotIn("모델이 지어낸", card.response_guide)
+        self.assertNotIn("모델이 지어낸", card.co_regulation_action or "")
+
+    def test_missing_or_invalid_connection_type_drops_the_card(self):
+        import diary_report_v2
+
+        no_tag = {
+            "question": "그때 뭐 했어?",
+            "purpose": "행동 확인",
+            "evidenceRefs": [_ref("QA_ANSWER", "101")],
+        }
+        bad_tag = self._question("SOMETHING_ELSE", ref="102")
+        general_tag = self._question("GENERAL_CONNECTION", ref="103")
+        raw = _signals(caregiverQuestions=[no_tag, bad_tag, general_tag])
+        insights = diary_report_v2.build_diary_insights(
+            raw, _diary_request(), vision_available=True
+        )
+
+        # 세 카드 모두 무효(태그 없음/화이트리스트 밖/GENERAL 은 게이트 통과 대상 아님) → 게이트 0개 →
+        #   기본 교감 카드 하나만 남는다.
+        self.assertEqual(len(insights.caregiver_questions), 1)
+        self.assertEqual(
+            insights.caregiver_questions[0].connection_type, "GENERAL_CONNECTION"
+        )
+
+    def test_orders_emotion_first_and_caps_at_two(self):
+        import diary_report_v2
+
+        raw = _signals(
+            caregiverQuestions=[
+                self._question("PERSPECTIVE_TAKING", question="그 친구는 어떤 마음이었을까?", ref="101"),
+                self._question("SHARED_JOY", question="그때 뭐가 제일 신났어?", ref="102"),
+                self._question("FEELING_SHARING", question="그때 네 마음은 어땠어?", ref="103"),
+            ]
+        )
+        insights = diary_report_v2.build_diary_insights(
+            raw, _diary_request(), vision_available=True
+        )
+
+        types = [card.connection_type for card in insights.caregiver_questions]
+        self.assertEqual(types, ["FEELING_SHARING", "SHARED_JOY"])
+
+    def test_general_fallback_when_no_gate_passes_but_v2_has_content(self):
+        import diary_report_v2
+
+        # 실컨텐츠(핵심 이야기·흐름·관찰)는 있고 교감 질문만 하나도 통과하지 못한 경우.
+        raw = _signals(caregiverQuestions=[])
+        insights = diary_report_v2.build_diary_insights(
+            raw, _diary_request(), vision_available=True
+        )
+
+        self.assertIsNotNone(insights)
+        self.assertEqual(len(insights.caregiver_questions), 1)
+        card = insights.caregiver_questions[0]
+        self.assertEqual(card.connection_type, "GENERAL_CONNECTION")
+        self.assertEqual(card.question, "오늘 그림에서 가장 마음에 남는 부분이 어디야?")
+        self.assertIsNone(card.co_regulation_action)
+        self.assertEqual(card.evidence_refs, [])
+
+    def test_general_fallback_not_injected_into_empty_v2(self):
+        import diary_report_v2
+
+        # 실컨텐츠가 하나도 없으면(신호 전부 빈 배열, 근거 없는 요청) V2 자체가 None 이고,
+        #   기본 교감 카드도 생기지 않는다 — 빈 V2 방어가 기본 카드보다 먼저다.
+        empty_req = contracts.ObservationGenerationRequest(
+            request_id="req-empty",
+            analysis_id=1,
+            drawing_session_id=2,
+            analysis_type="FINAL",
+            question_difficulty="PRESCHOOL",
+            question_count=0,
+            answered_count=0,
+            skipped_count=0,
+            unrecognized_speech_count=0,
+            subject_summaries=[],
+        )
+        insights = diary_report_v2.build_diary_insights(
+            {}, empty_req, vision_available=False
+        )
+        self.assertIsNone(insights)
+
+    def test_connection_fields_serialize_as_camel_case(self):
+        card = contracts.DiaryCaregiverQuestion(
+            question="그때 마음이 어땠어?",
+            connection_type="FEELING_SHARING",
+            response_guide="그랬구나 하고 마음을 받아 주세요.",
+            co_regulation_action="같이 그려 볼까요?",
+        )
+        dumped = card.model_dump(by_alias=True)
+        self.assertIn("connectionType", dumped)
+        self.assertIn("responseGuide", dumped)
+        self.assertIn("coRegulationAction", dumped)
+        self.assertEqual(dumped["connectionType"], "FEELING_SHARING")
+
+
 class DiaryReportPromptV2Test(unittest.TestCase):
     def test_report_prompt_emits_structured_diary_signals_without_forced_filler(self):
         import prompts_registry
@@ -950,6 +1091,16 @@ class DiaryReportPromptV2Test(unittest.TestCase):
         self.assertIn('"narrativeFlow"', text)
         self.assertIn('"sessionObservations"', text)
         self.assertIn('"caregiverQuestions"', text)
+        # 교감 유형 4종을 태그하게 하고, 공감 반응 문구는 모델이 만들지 않음을 명시한다.
+        for connection_type in (
+            "FEELING_SHARING",
+            "COMFORT_SEEKING",
+            "SHARED_JOY",
+            "PERSPECTIVE_TAKING",
+        ):
+            self.assertIn(connection_type, text)
+        self.assertIn("connectionType", text)
+        self.assertIn("responseGuide", text)
         self.assertNotIn("쓸 내용이 마땅치 않아도", text)
         self.assertNotIn("무난한 문장을 채운다", text)
         self.assertIn("한 번의 활동을 아이의 평소 경향으로 쓰지 마", text)
@@ -980,7 +1131,9 @@ class DiaryReportPromptV2Test(unittest.TestCase):
         # 3.2.0 — 고른 답만 있는 활동에서 모델이 diarySignals 를 통째로 비워 돌려주던 것을
         #   막았다. 금지("자발적 감정으로 쓰지 마")에 지시("사실로는 골랐다고 적어라")를 붙인
         #   것이라 규칙이 늘어난 것이 아니라 완성된 것이므로 minor 다.
-        self.assertEqual(prompts_registry._PROMPT_SEMVER["report_diary"], "3.2.0")
+        # 3.3.0 — caregiverQuestions 를 "오늘 마음 나누기" 교감 전용으로 재설계했다. 질문에
+        #   connectionType 태그만 요구하고 공감 반응(responseGuide)은 서버가 정적 매핑한다.
+        self.assertEqual(prompts_registry._PROMPT_SEMVER["report_diary"], "3.3.0")
         self.assertEqual(prompts_registry._PROMPT_SEMVER["report_review"], "2.1.0")
         self.assertEqual(
             prompts_registry._PROMPT_SEMVER["report_review_diary"], "1.0.0"

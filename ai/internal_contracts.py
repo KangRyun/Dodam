@@ -878,10 +878,20 @@ class DiaryUnknownItem(_CamelModel):
 
 
 class DiaryCaregiverQuestion(_CamelModel):
-    """보호자가 활동 내용에 이어서 그대로 물어볼 수 있는 질문."""
+    """보호자가 아이와 정서적 교감을 나누도록 돕는 "오늘 마음 나누기" 카드.
+
+    ``question`` 은 아이에게 그대로 물어볼 감정 앵커 질문이고, ``response_guide`` 는 아이 답에
+    부모가 마음으로 반응하는 법(반영적 경청 — 마음을 그대로 받아 주고 함께 느껴 주기)이다.
+    ``response_guide`` 와 ``co_regulation_action`` 은 **서버가 ``connection_type`` 으로 정적
+    매핑**한다 — 모델이 만들지 않는다. 공감 문구를 모델에게 맡기면 발달 규준 주장이나 지시형
+    훈육으로 새기 쉬워서다.
+    """
 
     question: str
-    purpose: str
+    purpose: str = ""
+    connection_type: str = "GENERAL_CONNECTION"
+    response_guide: str = ""
+    co_regulation_action: str | None = None
     evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
 
 

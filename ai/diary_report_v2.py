@@ -885,33 +885,125 @@ def _unknown_items(
     ]
 
 
+# "오늘 마음 나누기" 교감 유형.
+#
+# 모델은 각 질문에 connectionType 을 **태그만** 한다. 부모가 아이 답에 어떻게 마음으로 반응할지
+#   (responseGuide)와 함께 해보기(coRegulationAction)는 **서버가 유형으로 정적 매핑**한다 —
+#   모델에게 맡기면 공감 문구가 발달 규준 주장이나 지시형 훈육으로 샌다. 금지어(규준·또래·정상발달·
+#   지연·충족)를 정적 문구에서 배제한다.
+_CONNECTION_FEELING_SHARING = "FEELING_SHARING"
+_CONNECTION_COMFORT_SEEKING = "COMFORT_SEEKING"
+_CONNECTION_SHARED_JOY = "SHARED_JOY"
+_CONNECTION_PERSPECTIVE_TAKING = "PERSPECTIVE_TAKING"
+_CONNECTION_GENERAL = "GENERAL_CONNECTION"
+
+# 감정 우선 정렬 순서(값이 작을수록 먼저). GENERAL 은 게이트 통과 0개일 때만 쓰는 폴백이라 여기 없다.
+_CONNECTION_PRIORITY: dict[str, int] = {
+    _CONNECTION_FEELING_SHARING: 0,
+    _CONNECTION_COMFORT_SEEKING: 1,
+    _CONNECTION_SHARED_JOY: 2,
+    _CONNECTION_PERSPECTIVE_TAKING: 3,
+}
+
+# connectionType → (responseGuide, coRegulationAction). LLM 관여 금지. 서버가 그대로 부착한다.
+_CONNECTION_STATIC: dict[str, tuple[str, str | None]] = {
+    _CONNECTION_FEELING_SHARING: (
+        '아이가 말하면 먼저 "그랬구나, 그런 마음이었구나" 하고 마음을 그대로 받아 주세요. '
+        "옳고 그름을 판단하거나 해결책을 주기보다, 그 마음을 함께 느껴 주는 것으로 충분해요.",
+        "그때 마음을 색이나 표정으로 같이 그려 볼까요?",
+    ),
+    _CONNECTION_COMFORT_SEEKING: (
+        '힘들었던 마음을 "많이 속상했겠다" 하고 알아주세요. 바로 다독이려 하기보다 아이가 다 말할 때까지 '
+        "기다려 주면, 아이는 마음을 안전하게 꺼내 놓아요.",
+        "다음에 비슷한 일이 생기면 엄마·아빠한테 어떻게 말하면 좋을지 같이 정해 볼까요?",
+    ),
+    _CONNECTION_SHARED_JOY: (
+        '아이가 신났던 순간을 말하면 "우와, 정말 신났겠다!" 하고 그 기쁨을 같이 키워 주세요. '
+        "함께 기뻐해 준 경험은 아이가 좋은 마음을 더 나누고 싶게 만들어요.",
+        "그 즐거웠던 순간을 하나 더 그림에 더해 볼까요?",
+    ),
+    _CONNECTION_PERSPECTIVE_TAKING: (
+        '"그 친구는 그때 어떤 마음이었을까?" 하고 아이 답을 기다려 주세요. 정답을 맞히게 하기보다 '
+        "상상해 보는 과정 자체가 아이가 다른 사람 마음을 헤아리는 힘을 길러요.",
+        "그 사람 표정을 그림에 같이 그려 볼까요?",
+    ),
+}
+
+# 게이트 통과 0개일 때만 쓰는 기본 교감 카드. 근거가 필요 없고 서버가 문구까지 정한다.
+_GENERAL_CONNECTION_QUESTION = "오늘 그림에서 가장 마음에 남는 부분이 어디야?"
+_GENERAL_CONNECTION_GUIDE = (
+    '아이가 고른 부분을 함께 보면서 "이게 제일 마음에 남았구나" 하고 그 마음을 따라가 주세요. '
+    "특별한 질문보다, 아이 이야기를 끝까지 들어 주는 것이 가장 큰 교감이에요."
+)
+
+
 def _caregiver_questions(
     raw: object, allowed: frozenset[tuple[str, str]]
 ) -> list[contracts.DiaryCaregiverQuestion]:
+    """"오늘 마음 나누기" 교감 카드를 조립한다.
+
+    1. 모델이 태그한 ``connectionType`` 을 감정 4종 화이트리스트로 검증한다. 없거나 무효면
+       **그 카드를 버린다** — 서버가 임의로 유형을 정해 GENERAL 로 덮지 않는다.
+    2. 통과한 카드에 ``connectionType`` 으로 정적 ``responseGuide``·``coRegulationAction`` 을
+       부착한다(모델이 준 값은 무시).
+    3. 감정 우선으로 정렬한다: 감정 나누기 > 위로 > 기쁨 > 마음 헤아리기. 같은 순위면 모델 순서 유지.
+    4. 최대 2개.
+
+    게이트 통과 0개일 때 기본 카드를 주입하는 것은 여기가 아니라 :func:`build_diary_insights` 다.
+    빈 V2 방어(None-guard)를 통과한 뒤에만 기본 카드가 생겨야 하기 때문이다.
+    """
     if not isinstance(raw, list):
         return []
-    questions: list[contracts.DiaryCaregiverQuestion] = []
-    for item in raw:
+    scored: list[tuple[int, int, contracts.DiaryCaregiverQuestion]] = []
+    for order, item in enumerate(raw):
         if not isinstance(item, Mapping):
+            continue
+        connection_type = re.sub(
+            r"[^A-Z_]", "", _clean_text(item.get("connectionType")).upper()
+        )
+        # 감정 교감 4종만 통과. GENERAL 을 모델이 태그해도 여기서는 받지 않는다 — 기본 카드는 서버가
+        #   빈 상태에서만 만든다.
+        if connection_type not in _CONNECTION_PRIORITY:
             continue
         refs = _parse_refs(item.get("evidenceRefs"), allowed)
         question = _safe_public_text(item.get("question"), max_len=160)
         purpose = _safe_public_text(item.get("purpose"), max_len=100)
-        if not refs or not question or not purpose:
+        if not refs or not question:
             continue
         # 화면에서 그대로 읽는 질문이다. 문장 중간에 여러 질문을 섞지 않는다.
         if question.count("?") > 1:
             continue
         if not question.endswith("?"):
             question += "?"
-        questions.append(
-            contracts.DiaryCaregiverQuestion(
-                question=question, purpose=purpose, evidence_refs=refs
+        guide, co_regulation = _CONNECTION_STATIC[connection_type]
+        scored.append(
+            (
+                _CONNECTION_PRIORITY[connection_type],
+                order,
+                contracts.DiaryCaregiverQuestion(
+                    question=question,
+                    purpose=purpose,
+                    connection_type=connection_type,
+                    response_guide=guide,
+                    co_regulation_action=co_regulation,
+                    evidence_refs=refs,
+                ),
             )
         )
-        if len(questions) >= 2:
-            break
-    return questions
+    scored.sort(key=lambda entry: (entry[0], entry[1]))
+    return [question for _, _, question in scored][:2]
+
+
+def _general_connection_card() -> contracts.DiaryCaregiverQuestion:
+    """감정 교감 카드가 하나도 통과하지 못했을 때의 기본 교감 카드. 근거를 요구하지 않는다."""
+    return contracts.DiaryCaregiverQuestion(
+        question=_GENERAL_CONNECTION_QUESTION,
+        purpose="",
+        connection_type=_CONNECTION_GENERAL,
+        response_guide=_GENERAL_CONNECTION_GUIDE,
+        co_regulation_action=None,
+        evidence_refs=[],
+    )
 
 
 def _data_quality(
@@ -988,6 +1080,11 @@ def build_diary_insights(
         )
     ):
         return None
+    # 게이트 통과 0개 → "오늘 마음 나누기" 기본 교감 카드 1개. ⚠️ None-guard **통과 후**에만
+    #   주입하고, guard 판정(위 any(...))에는 세지 않는다 — child_voice 함정과 같다. 실컨텐츠가
+    #   하나도 없으면 여기 오기 전에 None 으로 접혀 빈 V2 가 열리지 않는다.
+    if not questions:
+        questions = [_general_connection_card()]
     return contracts.DiaryInsights(
         story_snapshot=snapshot,
         narrative_flow=flow,

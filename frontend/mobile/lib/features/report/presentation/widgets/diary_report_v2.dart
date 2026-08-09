@@ -100,16 +100,13 @@ class DiaryReportV2Body extends StatelessWidget {
             ],
           ),
         ),
-      if (insights.caregiverQuestions.isNotEmpty)
-        _DiarySection(
-          title: '이어서 물어보면 좋아요',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final question in insights.caregiverQuestions)
-                _CaregiverQuestionTile(question: question),
-            ],
-          ),
+      // '오늘 마음 나누기' — 질문만 던지는 자리가 아니라, 아이 답에 공감해 주는
+      //   방법과 함께 해볼 한 가지를 곁들여 정서적 교감을 돕는 섹션이다. 듣기 안내는
+      //   섹션 인트로 아래 보조 문구로 함께 둔다.
+      if (insights.caregiverQuestions.isNotEmpty || insights.listeningTip != null)
+        _EmotionConnectSection(
+          questions: insights.caregiverQuestions,
+          listeningTip: insights.listeningTip,
         ),
       if (insights.developmentalObservations.isNotEmpty)
         _DiarySection(
@@ -134,8 +131,6 @@ class DiaryReportV2Body extends StatelessWidget {
             ],
           ),
         ),
-      if (insights.listeningTip != null)
-        _ListeningTipCard(tip: insights.listeningTip!),
       // 확인하지 못한 것을 마지막에 둔다. 섹션이 없으면 보호자는 '문제가 없었다'로 읽는다.
       if (insights.unknownItems.isNotEmpty)
         _DiarySection(
@@ -417,58 +412,220 @@ class _SessionObservationCard extends StatelessWidget {
   );
 }
 
-/// 보호자가 그대로 물어볼 질문.
-class _CaregiverQuestionTile extends StatelessWidget {
-  const _CaregiverQuestionTile({required this.question});
+/// '오늘 마음 나누기' 섹션.
+///
+/// 아이 이야기를 다 본 보호자에게 "그래서 무엇을 해석해야 하나"가 아니라 "오늘 아이
+/// 마음을 어떻게 함께 나눌까"를 건네는 자리다. 질문 하나하나가 공감 반응·함께 해볼
+/// 한 가지와 묶여 교감 카드로 나온다. 듣기 안내는 인트로 아래 보조 문구로 둔다.
+class _EmotionConnectSection extends StatelessWidget {
+  const _EmotionConnectSection({required this.questions, this.listeningTip});
 
-  final DiaryCaregiverQuestionDto question;
+  final List<DiaryCaregiverQuestionDto> questions;
+  final String? listeningTip;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) => _DiarySection(
+    title: '오늘 마음 나누기',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Padding(
-          padding: EdgeInsets.only(top: 3),
-          child: Icon(
-            Icons.chat_bubble_outline,
-            size: 18,
-            color: AppColors.lavender,
+          padding: EdgeInsets.only(bottom: AppSpacing.sm),
+          child: Text(
+            '아이 마음을 함께 들여다보는 시간이에요.',
+            style: TextStyle(
+              color: AppColors.ink,
+              fontSize: 15,
+              height: 1.55,
+            ),
           ),
         ),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                question.question,
-                style: const TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 16,
-                  height: 1.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (question.purpose != null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  question.purpose!,
-                  style: const TextStyle(
+        // 듣기 안내는 카드로 세우지 않고, 마음 나누기의 태도를 알려 주는 보조 문구로
+        //   인트로 아래에 둔다.
+        if (listeningTip case final tip?)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 2),
+                  child: Icon(
+                    Icons.hearing_outlined,
+                    size: 16,
                     color: AppColors.inkMuted,
-                    fontSize: 14,
-                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Text(
+                    tip,
+                    style: const TextStyle(
+                      color: AppColors.inkMuted,
+                      fontSize: 14,
+                      height: 1.55,
+                    ),
                   ),
                 ),
               ],
-            ],
+            ),
           ),
-        ),
+        for (final question in questions)
+          _EmotionConnectCard(question: question),
       ],
     ),
   );
 }
+
+/// 마음 나누기 교감 카드 한 장.
+///
+/// 💬 질문 → 🤍 공감 반응 → 🎨 함께 해보기 순으로 쌓는다. 서버가 값을 주지 않은
+/// 줄(`responseGuide`·`coRegulationAction` 이 `null`)은 통째로 감춘다 — 빈 자리를
+/// 문구로 메우지 않는다. `connectionType` 은 카드 색과 라벨 힌트로만 드러내고,
+/// enum 문자열을 그대로 보여 주지 않는다.
+class _EmotionConnectCard extends StatelessWidget {
+  const _EmotionConnectCard({required this.question});
+
+  final DiaryCaregiverQuestionDto question;
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = _connectionHint(question.connectionType);
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: hint.soft,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 교감 유형 힌트. enum 문자열이 아니라 사용자 문구로만 드러낸다.
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: 2,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              border: Border.all(color: hint.accent, width: 1),
+            ),
+            child: Text(
+              hint.label,
+              style: TextStyle(
+                color: hint.accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _EmotionConnectLine(
+            emoji: '💬',
+            text: question.question,
+            color: AppColors.ink,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+          // 공감 반응. 아이 답을 판단·해결로 받지 않고 마음을 그대로 받아 주는 방법이다.
+          if (question.responseGuide case final guide?) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _EmotionConnectLine(
+              emoji: '🤍',
+              text: guide,
+              color: AppColors.ink,
+              fontSize: 15,
+            ),
+          ],
+          // 함께 해보기. GENERAL_CONNECTION 은 서버가 null 로 주므로 이 줄이 통째로 빠진다.
+          if (question.coRegulationAction case final action?) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _EmotionConnectLine(
+              emoji: '🎨',
+              text: action,
+              color: hint.accent,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 교감 카드의 한 줄. 이모지와 본문을 나란히 둔다.
+class _EmotionConnectLine extends StatelessWidget {
+  const _EmotionConnectLine({
+    required this.emoji,
+    required this.text,
+    required this.color,
+    required this.fontSize,
+    this.fontWeight,
+  });
+
+  final String emoji;
+  final String text;
+  final Color color;
+  final double fontSize;
+  final FontWeight? fontWeight;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(emoji, style: TextStyle(fontSize: fontSize, height: 1.5)),
+      const SizedBox(width: AppSpacing.sm),
+      Expanded(
+        child: Text(
+          text,
+          style: TextStyle(
+            color: color,
+            fontSize: fontSize,
+            height: 1.55,
+            fontWeight: fontWeight,
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+/// 교감 유형별 카드 색과 라벨 힌트.
+///
+/// 강조색과 사용자 문구로만 유형을 드러낸다 — `connectionType` enum 문자열은 화면에
+/// 나오지 않는다. 모르는 값은 가장 중립적인 기본 교감으로 읽는다.
+({Color accent, Color soft, String label}) _connectionHint(
+  String connectionType,
+) => switch (connectionType) {
+  'FEELING_SHARING' => (
+    accent: AppColors.lavender,
+    soft: AppColors.lavenderSoft,
+    label: '마음 나누기',
+  ),
+  'COMFORT_SEEKING' => (
+    accent: AppColors.tangerinePressed,
+    soft: AppColors.tangerineSoft,
+    label: '속상한 마음 다독이기',
+  ),
+  'SHARED_JOY' => (
+    accent: AppColors.warning,
+    soft: AppColors.brandYellowSoft,
+    label: '기쁨 함께하기',
+  ),
+  'PERSPECTIVE_TAKING' => (
+    accent: AppColors.leafPressed,
+    soft: AppColors.leafSoft,
+    label: '다른 마음 헤아리기',
+  ),
+  _ => (
+    accent: AppColors.inkMuted,
+    soft: AppColors.surfaceSoft,
+    label: '함께 보기',
+  ),
+};
 
 /// 그림에서 보인 것.
 ///
@@ -738,39 +895,6 @@ class _DevelopmentalObservationCard extends StatelessWidget {
         ],
         // ⚠️ 출처명·URL·식별자를 여기 적지 않는다 (S15P11B209-1010 v2). 출처 내력은 서버가
         //   보관하고, 화면에는 섹션 하단의 고지 한 줄만 둔다.
-      ],
-    ),
-  );
-}
-
-/// 듣는 방법 한 줄.
-class _ListeningTipCard extends StatelessWidget {
-  const _ListeningTipCard({required this.tip});
-
-  final String tip;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(AppSpacing.md),
-    decoration: BoxDecoration(
-      color: AppColors.surfaceSoft,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(Icons.hearing_outlined, size: 18, color: AppColors.lavender),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Text(
-            tip,
-            style: const TextStyle(
-              color: AppColors.ink,
-              fontSize: 15,
-              height: 1.55,
-            ),
-          ),
-        ),
       ],
     ),
   );

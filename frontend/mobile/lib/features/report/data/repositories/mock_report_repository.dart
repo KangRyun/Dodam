@@ -226,6 +226,24 @@ final class MockReportRepository implements ReportRepository {
         {
           'question': '동생이랑 뭐 하고 놀 때가 제일 재밌어?',
           'purpose': '아이가 즐거웠던 순간을 스스로 더 이야기해 볼 수 있어요.',
+          'connectionType': 'SHARED_JOY',
+          'responseGuide': '아이가 신났던 순간을 말하면 "우와, 정말 신났겠다!" 하고 그 기쁨을 같이 키워 주세요. '
+              '함께 기뻐해 준 경험은 아이가 좋은 마음을 더 나누고 싶게 만들어요.',
+          'coRegulationAction': '그 즐거웠던 순간을 하나 더 그림에 더해 볼까요?',
+          'evidenceRefs': [
+            {'kind': 'QA_ANSWER', 'id': '804'},
+          ],
+        },
+        {
+          'question': '가족이랑 같이 있을 때 마음이 어땠어?',
+          'purpose': '함께 있을 때의 마음을 아이 말로 들어보기',
+          'connectionType': 'FEELING_SHARING',
+          'responseGuide': '아이가 말하면 먼저 "그랬구나, 그런 마음이었구나" 하고 마음을 그대로 받아 주세요. '
+              '옳고 그름을 판단하거나 해결책을 주기보다, 그 마음을 함께 느껴 주는 것으로 충분해요.',
+          'coRegulationAction': '그때 마음을 색이나 표정으로 같이 그려 볼까요?',
+          'evidenceRefs': [
+            {'kind': 'QA_ANSWER', 'id': '805'},
+          ],
         },
       ],
       'listeningTip': '그림 속 가족을 설명할 때 누구인지 먼저 물어봐 주면 아이가 자기 이야기를 '
