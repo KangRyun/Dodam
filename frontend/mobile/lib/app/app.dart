@@ -32,6 +32,7 @@ import '../features/notification/domain/failures/push_token_registration_failure
 import '../features/notification/domain/repositories/notification_inbox_repository.dart';
 import '../features/notification/domain/services/push_coordinator.dart';
 import '../features/notification/domain/services/push_setup.dart';
+import '../features/permission/application/permission_onboarding_controller.dart';
 import '../features/report/data/repositories/mock_report_repository.dart';
 import '../features/report/data/services/platform_report_file_actions.dart';
 import '../features/report/domain/repositories/report_repository.dart';
@@ -86,6 +87,7 @@ class DodamApp extends StatefulWidget {
     this.pendingHtpPhotoStore,
     this.guardianPinRepository,
     this.guardianPinGateEnabled = false,
+    this.permissionOnboarding,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -151,6 +153,10 @@ class DodamApp extends StatefulWidget {
   /// 응답하는 것이 확인된 뒤에 켠다. 확인 전에는 꺼 두는 것이 올바른 대응이다 —
   /// gate 안에서 장애를 우회시키면 보안 장치가 사라진다.
   final bool guardianPinGateEnabled;
+
+  /// 로그인 직후 한 번만 세우는 권한 안내 경계. 주입하지 않으면 화면이 서지 않고
+  /// 기존 흐름(로그인 → 프로필 선택 / 보호자 홈)이 그대로다 — 테스트 기본값이다.
+  final PermissionOnboardingController? permissionOnboarding;
   final String initialRoute;
 
   @override
@@ -485,6 +491,10 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       );
       return;
     }
+    // 권한 안내를 세울지 여기서 미리 읽어 둔다. 로그인·부트스트랩 화면은 이
+    // await가 끝난 뒤에야 다음 화면으로 넘어가므로, 라우터의 동기 판정
+    // (`isPending`)은 언제나 읽기가 끝난 값을 본다.
+    await widget.permissionOnboarding?.load();
     await _childController.loadChildren();
     // 보호자 세션이 확정된 뒤라야 알림함 조회에 토큰이 실린다.
     _refreshNotificationBadge();
@@ -646,6 +656,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       guardianPinRepository: _guardianPinRepository,
       guardianPinGateEnabled: widget.guardianPinGateEnabled,
       onReauthenticateGuardian: _reauthenticateGuardian,
+      permissionOnboarding: widget.permissionOnboarding,
     ),
   );
 }
