@@ -133,7 +133,7 @@ Run: `python -m unittest ai.test_diary_report_v2 -v`
 
 Expected: 모든 V2 기존 테스트와 V3 LIMITED/PARTIAL/RICH 테스트 PASS.
 
-- [ ] **Step 6: AI 계약 변경을 커밋한다**
+- [x] **Step 6: AI 계약 변경을 커밋한다**
 
 ```bash
 git add ai/internal_contracts.py ai/diary_report_v2.py ai/test_diary_report_v2.py
@@ -154,7 +154,7 @@ git commit -m "[S15P11B209-1019] feat(ai): 그림일기 V3 자료 범위 계약 
 - Consumes: Task 1의 `DiaryDataScope`, 허용 근거 참조
 - Produces: V3 `storyComponents`, `drawingObservations`, 검토 문제 코드
 
-- [ ] **Step 1: 품질 코드와 프롬프트 규칙 실패 테스트를 작성한다**
+- [x] **Step 1: 품질 코드와 프롬프트 규칙 실패 테스트를 작성한다**
 
 ```python
 def test_v3_review_prompt_covers_evidence_disclosure_and_alternatives(self):
@@ -170,13 +170,13 @@ def test_v3_review_prompt_covers_evidence_disclosure_and_alternatives(self):
         self.assertIn(code, text)
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
 Run: `python -m unittest ai.test_diary_report_v2.DiaryReportPromptV2Test.test_v3_review_prompt_covers_evidence_disclosure_and_alternatives -v`
 
 Expected: 새 코드가 프롬프트에 없어 FAIL.
 
-- [ ] **Step 3: Writer 출력과 Reviewer 규칙을 확장한다**
+- [x] **Step 3: Writer 출력과 Reviewer 규칙을 확장한다**
 
 `report_diary.txt`에 다음 출력을 추가한다.
 
@@ -196,7 +196,7 @@ Expected: 새 코드가 프롬프트에 없어 FAIL.
 - 가설은 두 개 이하이며 `alternativeExplanations`와 `clarificationQuestion`이 필수다.
 - 근거가 없으면 빈 배열과 `unknownItems`를 사용한다.
 
-- [ ] **Step 4: Reviewer 결과가 해당 섹션만 제거하는 테스트를 추가한다**
+- [x] **Step 4: Reviewer 결과가 해당 섹션만 제거하는 테스트를 추가한다**
 
 ```python
 def test_missing_alternative_removes_only_hypothesis_card(self):
@@ -215,13 +215,13 @@ def test_missing_alternative_removes_only_hypothesis_card(self):
     self.assertIsNotNone(result.diary_insights.story_snapshot)
 ```
 
-- [ ] **Step 5: AI 전체 관련 테스트를 실행한다**
+- [x] **Step 5: AI 전체 관련 테스트를 실행한다**
 
 Run: `python -m unittest ai.test_diary_report_v2 ai.test_report_client ai.test_report_safety -v`
 
 Expected: PASS.
 
-- [ ] **Step 6: 프롬프트 버전을 올리고 커밋한다**
+- [x] **Step 6: 프롬프트 버전을 올리고 커밋한다**
 
 `report_diary`는 `4.0.0`, `report_review_diary`는 `2.0.0`으로 올린다.
 

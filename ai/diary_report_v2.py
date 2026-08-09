@@ -1229,6 +1229,8 @@ def build_diary_insights(
         (
             snapshot is not None,
             bool(flow),
+            bool(story_components),
+            bool(drawing_observations),
             bool(observations),
             bool(questions),
             bool(developmental),

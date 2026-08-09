@@ -1555,6 +1555,12 @@ _DIARY_REVIEW_ISSUES = frozenset(
         "TIME_SCOPE_OVERCLAIM",
         "VISUAL_UNCERTAINTY_EXPOSED",
         "CHILD_VOICE_DISTORTION",
+        "GENERIC_INSIGHT",
+        "MISSING_ALTERNATIVE_EXPLANATION",
+        "EMOTION_LINK_UNCONFIRMED",
+        "MISSING_DATA_DISCLOSURE",
+        "MISSING_AUDIO_TRANSCRIPT",
+        "LONGITUDINAL_OVERCLAIM",
     }
 )
 # 테스트·관측용 전체 코드 목록. 실제 파싱 허용 목록은 활동별로 분리한다.
@@ -1714,6 +1720,31 @@ def _review_targets(
             )
     diary = result.diary_insights
     if not is_htp and diary is not None:
+        for index, component in enumerate(diary.story_components):
+            if not component.text:
+                continue
+            targets.append(
+                {
+                    "id": f"diary.storyComponent.{index}",
+                    "글": component.text,
+                    "확인 상태": component.status,
+                    "근거": diary_report_v2.evidence_texts_for_ids(
+                        req, component.evidence_refs
+                    ),
+                }
+            )
+        for index, observation in enumerate(diary.drawing_observations):
+            targets.append(
+                {
+                    "id": f"diary.drawingObservation.{index}",
+                    "글": observation.text,
+                    "자리": _FACT_SLOT_LABEL,
+                    "확신도": observation.confidence,
+                    "근거": diary_report_v2.evidence_texts_for_ids(
+                        req, observation.evidence_refs
+                    ),
+                }
+            )
         if diary.story_snapshot is not None:
             targets.append(
                 {
@@ -1914,6 +1945,16 @@ def _apply_findings(
 
     diary = result.diary_insights
     if diary is not None:
+        diary.story_components = [
+            component
+            for index, component in enumerate(diary.story_components)
+            if f"diary.storyComponent.{index}" not in flagged
+        ]
+        diary.drawing_observations = [
+            observation
+            for index, observation in enumerate(diary.drawing_observations)
+            if f"diary.drawingObservation.{index}" not in flagged
+        ]
         diary.session_observations = [
             observation
             for index, observation in enumerate(diary.session_observations)
@@ -1975,6 +2016,8 @@ def _apply_findings(
         "diary.observation.",
         "diary.question.",
         "diary.flow.",
+        "diary.storyComponent.",
+        "diary.drawingObservation.",
     )
     contained_exact = {"diary.story", "diary.listeningTip"}
     for target in flagged:
