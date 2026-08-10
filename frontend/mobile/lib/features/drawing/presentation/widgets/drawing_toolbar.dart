@@ -22,7 +22,6 @@ final class DrawingToolbar extends StatelessWidget {
     required this.onRedo,
     required this.onRetrySave,
     required this.onInstrumentChanged,
-    required this.onEraserMenuAction,
     required this.onColorChanged,
     required this.onWidthChanged,
     required this.onOpenPalette,
@@ -42,7 +41,6 @@ final class DrawingToolbar extends StatelessWidget {
   final VoidCallback onRedo;
   final VoidCallback onRetrySave;
   final ValueChanged<DrawingInstrument> onInstrumentChanged;
-  final ValueChanged<DrawingEraserMenuAction> onEraserMenuAction;
   final ValueChanged<Color> onColorChanged;
   final ValueChanged<double> onWidthChanged;
   final VoidCallback onOpenPalette;
@@ -191,19 +189,14 @@ final class DrawingToolbar extends StatelessWidget {
       _tutorialTarget(
         CanvasTutorialTargetId.eraser,
         'main',
-        Builder(
-          builder: (anchorContext) => DrawingToolButton(
-            key: const ValueKey('drawing-tool-eraser'),
-            artwork: CanvasToolArtwork.eraser,
-            pointColor: toolState.color,
-            selected: toolState.instrument == DrawingInstrument.eraser,
-            semanticLabel: '지우개 도구',
-            tooltip: '지우개',
-            onPressed: () {
-              onInstrumentChanged(DrawingInstrument.eraser);
-              _showEraserMenu(anchorContext);
-            },
-          ),
+        DrawingToolButton(
+          key: const ValueKey('drawing-tool-eraser'),
+          artwork: CanvasToolArtwork.eraser,
+          pointColor: toolState.color,
+          selected: toolState.instrument == DrawingInstrument.eraser,
+          semanticLabel: '지우개 도구',
+          tooltip: '지우개',
+          onPressed: () => onInstrumentChanged(DrawingInstrument.eraser),
         ),
       ),
       _instrumentButton(
@@ -239,38 +232,6 @@ final class DrawingToolbar extends StatelessWidget {
     );
     if (instrument != DrawingInstrument.crayon) return target;
     return KeyedSubtree(key: const ValueKey('drawing-tool-pen'), child: target);
-  }
-
-  Future<void> _showEraserMenu(BuildContext context) async {
-    final anchor = context.findRenderObject()! as RenderBox;
-    final overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final topLeft = anchor.localToGlobal(Offset.zero, ancestor: overlay);
-    final selected = await showMenu<DrawingEraserMenuAction>(
-      context: context,
-      position: RelativeRect.fromRect(
-        topLeft & anchor.size,
-        Offset.zero & overlay.size,
-      ),
-      items: const [
-        PopupMenuItem(
-          key: ValueKey('drawing-eraser-stroke'),
-          value: DrawingEraserMenuAction.selectStroke,
-          child: Text('선 지우개'),
-        ),
-        PopupMenuItem(
-          key: ValueKey('drawing-eraser-area'),
-          value: DrawingEraserMenuAction.selectArea,
-          child: Text('영역 지우개'),
-        ),
-        PopupMenuItem(
-          key: ValueKey('drawing-eraser-clear-all'),
-          value: DrawingEraserMenuAction.clearAll,
-          child: Text('전체 지우기'),
-        ),
-      ],
-    );
-    if (selected != null) onEraserMenuAction(selected);
   }
 
   Widget _secondaryControls() => SingleChildScrollView(

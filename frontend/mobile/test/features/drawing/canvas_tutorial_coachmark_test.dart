@@ -65,13 +65,15 @@ void main() {
     final tutorial = _tutorial(status: 'IN_PROGRESS', lastStep: 'ERASER');
     await _pumpDrawing(tester, tutorial: tutorial);
     expect(find.text('지우개로 고쳐요'), findsOneWidget);
+    expect(find.text('지우개를 누르고 굵기를 조절해 원하는 부분을 지워 보세요.'), findsOneWidget);
 
-    // 안내를 보면서 실제 지우개 버튼을 눌러 세부 메뉴까지 확인할 수 있어야 한다.
+    // 안내를 보면서 실제 지우개 버튼을 누르면 바로 영역 지우개가 선택된다.
     await tester.tap(find.byKey(const ValueKey('drawing-tool-eraser')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('drawing-eraser-stroke')), findsOneWidget);
-    expect(find.byKey(const ValueKey('drawing-eraser-area')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawing-eraser-stroke')), findsNothing);
+    expect(find.byKey(const ValueKey('drawing-eraser-area')), findsNothing);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
   testWidgets('안내 중에는 캔버스에 그려지지 않고, 끝나면 다시 그려진다', (tester) async {
@@ -387,10 +389,8 @@ final class _ConversationRepository implements ConversationRepository {
     required int drawingSessionId,
     int? analysisId,
     required String idempotencyKey,
-  }) async => const ConversationStartResult(
-    conversationId: 8001,
-    maxQuestionCount: 5,
-  );
+  }) async =>
+      const ConversationStartResult(conversationId: 8001, maxQuestionCount: 5);
 
   @override
   Future<AiQuestion> requestNextQuestion({

@@ -28,18 +28,8 @@ void main() {
       DrawingTool.pen,
     );
     expect(
-      const DrawingToolState(
-        instrument: DrawingInstrument.eraser,
-        eraserMode: DrawingEraserMode.area,
-      ).wireTool,
+      const DrawingToolState(instrument: DrawingInstrument.eraser).wireTool,
       DrawingTool.eraser,
-    );
-    expect(
-      const DrawingToolState(
-        instrument: DrawingInstrument.eraser,
-        eraserMode: DrawingEraserMode.stroke,
-      ).wireTool,
-      isNull,
     );
     expect(
       const DrawingToolState(instrument: DrawingInstrument.fill).wireTool,

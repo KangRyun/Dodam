@@ -121,9 +121,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('color-빨강')));
     await tester.tap(find.byKey(const ValueKey('drawing-tool-eraser')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('영역 지우개'));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     for (final (width, offset) in [
       (4.0, const Offset(-80, -40)),
@@ -167,9 +165,7 @@ void main() {
     expect(tester.widget<DrawingToolButton>(eraser).selected, isFalse);
 
     await tester.tap(eraser);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('선 지우개'));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(tester.widget<DrawingToolButton>(eraser).selected, isTrue);
     expect(
