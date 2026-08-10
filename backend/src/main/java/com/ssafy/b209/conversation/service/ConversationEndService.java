@@ -2,6 +2,7 @@ package com.ssafy.b209.conversation.service;
 
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.child.domain.Child;
+import com.ssafy.b209.conversation.domain.ConversationCompletionReason;
 import com.ssafy.b209.conversation.domain.ConversationMessage;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.dto.EndConversationRequest;
@@ -23,10 +24,13 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 보호자 권한과 최신 질문 상태를 확인한 뒤 대화를 종료한다.
  *
- * <p>그림 작성 중 시작된 대화는 종료 후에도 Drawing 단계를 유지하며, 그림 완료 이후의 대화는 Reflection 단계로 전환한다.
+ * <p>그림 작성 중 시작된 대화는 종료 후에도 Drawing 단계를 유지한다. 그림일기의 질문 상한 종료는 새 그림 분석으로 대화를 다시 열 수 있도록 Conversing
+ * 단계를 보존하고, 그 밖의 그림 완료 이후 대화는 Reflection 단계로 전환한다.
  */
 @Service
 public class ConversationEndService {
+
+  private static final String ART_DIARY_CODE = "ART_DIARY";
 
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final ConversationEndAuthorizationRepository authorizationRepository;
@@ -85,7 +89,8 @@ public class ConversationEndService {
    * 현재 보호자가 접근 가능한 진행 중 대화를 종료하고 연결된 그림 세션의 후속 단계를 확정한다.
    *
    * <p>이미 종료된 대화는 최초 완료 사유와 시각을 바꾸지 않고 같은 종료 결과를 반환한다. 마지막 질문 식별자가 전달되면 잠금 안에서 최신 질문과 비교해 오래된 화면
-   * 상태로 인한 종료를 차단한다. 그림 작성 또는 최종 분석 중 종료하면 해당 단계를 유지하고, 최종 분석 완료 처리가 종료된 대화를 확인해 Reflection으로 전환한다.
+   * 상태로 인한 종료를 차단한다. 그림 작성 또는 최종 분석 중 종료하면 해당 단계를 유지한다. 그림일기 질문 상한 종료는 새 분석 기반 재개를 위해 Conversing
+   * 단계를 보존하며, 나머지 그림 완료 이후 대화는 Reflection으로 전환한다.
    *
    * @param conversationId 종료할 대화 세션 식별자
    * @param request 종료 사유와 마지막 질문 식별자
@@ -123,11 +128,19 @@ public class ConversationEndService {
     conversation.complete(request.reason(), LocalDateTime.now(clock));
     recordEnded(conversation, drawingSession, request);
     DrawingStage nextStage = drawingSession.getCurrentStage();
-    if (nextStage == DrawingStage.CONVERSING || nextStage == DrawingStage.REFLECTION) {
+    if ((nextStage == DrawingStage.CONVERSING || nextStage == DrawingStage.REFLECTION)
+        && !shouldKeepArtDiaryOpen(drawingSession, request.reason())) {
       drawingSession.enterReflection();
       nextStage = DrawingStage.REFLECTION;
     }
     return toResponse(conversation, nextStage);
+  }
+
+  private boolean shouldKeepArtDiaryOpen(
+      DrawingSession drawingSession, ConversationCompletionReason completionReason) {
+    return completionReason == ConversationCompletionReason.QUESTION_LIMIT_REACHED
+        && drawingSession.getDrawingType() != null
+        && ART_DIARY_CODE.equals(drawingSession.getDrawingType().getCode());
   }
 
   /**

@@ -1863,7 +1863,11 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
     _answerFlow.markSubmitted(AnswerSource.skip, messageId: question.messageId);
     _questionDisplayController.dismiss();
-    await _requestFollowingQuestion(null);
+    // HTP는 완성된 한 장을 두고 정해진 질문을 이어 가지만, 그림일기는 아이가
+    // 다시 그린 뒤 새 분석이 생길 때까지 대화를 쉬어야 한다.
+    if (widget.activityContext.isHtp) {
+      await _requestFollowingQuestion(null);
+    }
   }
 
   /// 저장된 응답을 문맥으로 전달해 같은 그림의 다음 질문을 요청한다.

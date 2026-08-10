@@ -18,6 +18,7 @@ import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingStage;
+import com.ssafy.b209.drawing.domain.DrawingType;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
@@ -44,6 +45,7 @@ class ConversationEndServiceTest {
   @Mock private DrawingSessionRepository drawingRepository;
   @Mock private ConversationMessageRepository messageRepository;
   @Mock private DrawingSession drawingSession;
+  @Mock private DrawingType drawingType;
   @Mock private ConversationEventRecorder eventRecorder;
 
   private ConversationEndService service;
@@ -89,6 +91,33 @@ class ConversationEndServiceTest {
     assertThat(response.nextStage()).isEqualTo(DrawingStage.REFLECTION);
     assertThat(conversation.isCompleted()).isTrue();
     verify(drawingSession).enterReflection();
+  }
+
+  @Test
+  void keepsArtDiaryConversingWhenQuestionLimitIsReached() {
+    ConversationSession conversation = conversation();
+    ConversationMessage latestQuestion = question(803L);
+    given(currentUserResolver.requireUserId()).willReturn(7L);
+    given(authorizationRepository.hasConversationAccess(7L, 20L)).willReturn(true);
+    given(conversationRepository.findByIdForUpdate(20L)).willReturn(Optional.of(conversation));
+    given(drawingRepository.findNotDeletedByIdForUpdate(100L))
+        .willReturn(Optional.of(drawingSession));
+    given(drawingSession.getCurrentStage()).willReturn(DrawingStage.CONVERSING);
+    given(drawingSession.getDrawingType()).willReturn(drawingType);
+    given(drawingType.getCode()).willReturn("ART_DIARY");
+    given(
+            messageRepository
+                .findFirstByConversationSessionIdAndMessageTypeOrderByMessageSequenceDesc(
+                    20L, "QUESTION"))
+        .willReturn(Optional.of(latestQuestion));
+
+    EndConversationResponse response =
+        service.end(
+            20L,
+            new EndConversationRequest(ConversationCompletionReason.QUESTION_LIMIT_REACHED, 803L));
+
+    assertThat(response.nextStage()).isEqualTo(DrawingStage.CONVERSING);
+    verify(drawingSession, never()).enterReflection();
   }
 
   @Test
