@@ -13,7 +13,6 @@ final class DrawingCursorState {
     required this.visible,
     required this.documentPosition,
     required this.instrument,
-    required this.eraserMode,
     required this.documentWidth,
     required this.deviceKind,
     this.color = AppColors.canvasInk,
@@ -22,7 +21,6 @@ final class DrawingCursorState {
   final bool visible;
   final Offset documentPosition;
   final DrawingInstrument instrument;
-  final DrawingEraserMode eraserMode;
   final double documentWidth;
   final PointerDeviceKind deviceKind;
 
@@ -30,8 +28,10 @@ final class DrawingCursorState {
   final Color color;
 
   /// 이 도구·굵기로 실제로 찍히는 자국의 지름이다.
-  double get footprint =>
-      DrawingStrokeRenderer.footprintFor(instrument.brushProfile, documentWidth);
+  double get footprint => DrawingStrokeRenderer.footprintFor(
+    instrument.brushProfile,
+    documentWidth,
+  );
 }
 
 final class DrawingCursorController extends ValueNotifier<DrawingCursorState> {
@@ -46,7 +46,6 @@ final class DrawingCursorController extends ValueNotifier<DrawingCursorState> {
       visible: true,
       documentPosition: documentPosition,
       instrument: toolState.instrument,
-      eraserMode: toolState.eraserMode,
       documentWidth: toolState.width,
       deviceKind: deviceKind,
       color: toolState.color,
@@ -60,7 +59,6 @@ final class DrawingCursorController extends ValueNotifier<DrawingCursorState> {
       visible: false,
       documentPosition: current.documentPosition,
       instrument: current.instrument,
-      eraserMode: current.eraserMode,
       documentWidth: current.documentWidth,
       deviceKind: current.deviceKind,
       color: current.color,
@@ -133,10 +131,7 @@ final class DrawingCursorOverlay extends StatelessWidget {
 
   Widget _buildOutlinedCursor() {
     final cursorKey = switch (state.instrument) {
-      DrawingInstrument.eraser
-          when state.eraserMode == DrawingEraserMode.area =>
-        const ValueKey('area-eraser-cursor'),
-      DrawingInstrument.eraser => const ValueKey('stroke-eraser-cursor'),
+      DrawingInstrument.eraser => const ValueKey('area-eraser-cursor'),
       DrawingInstrument.crayon => const ValueKey('crayon-cursor'),
       DrawingInstrument.pencil => const ValueKey('pencil-cursor'),
       DrawingInstrument.brush => const ValueKey('brush-cursor'),

@@ -287,15 +287,13 @@ class _DrawingScreenState extends State<DrawingScreen>
   double get _thickness => _toolState.width;
   int? _activePointer;
 
-  /// 채우기·획 지우개·전체 지우기처럼 그림 이미지를 통째로 바꾸는 중인지다.
+  /// 채우기처럼 그림 이미지를 통째로 바꾸는 중인지다.
   /// 이 동안에는 입력을 막아 캡처와 그림이 어긋나지 않게 한다.
   bool _isApplyingRasterMutation = false;
 
   /// 캡처가 끝나 업로드만 남았을 때 참이 된다. 업로드를 기다리는 동안에도
   /// 아이가 계속 그릴 수 있어야 한다.
   bool _rasterMutationAllowsDrawing = false;
-  bool _isStrokeEraseGestureActive = false;
-  bool _strokeEraseFallbackActive = false;
 
   /// 오래 걸리는 채우기 계산이 끝났을 때 그 사이 다른 변경이 있었는지 가린다.
   int _snapshotMutationGeneration = 0;
@@ -489,7 +487,6 @@ class _DrawingScreenState extends State<DrawingScreen>
         visible: false,
         documentPosition: Offset.zero,
         instrument: _toolState.instrument,
-        eraserMode: _toolState.eraserMode,
         documentWidth: _toolState.width,
         deviceKind: ui.PointerDeviceKind.touch,
       ),
@@ -736,7 +733,6 @@ class _DrawingScreenState extends State<DrawingScreen>
       if (closed && widget.activityContext.isHtp) {
         _toolState = DrawingToolState(
           instrument: DrawingInstrument.pencil,
-          eraserMode: _toolState.eraserMode,
           color: AppColors.canvasSwatchCharcoal,
           width: _toolState.width,
         );
@@ -757,24 +753,13 @@ class _DrawingScreenState extends State<DrawingScreen>
     return DrawingCanvasDeviceClass.mobilePortrait;
   }
 
-  /// 커서에 보여 줄 도구 상태다. 지울 획이 없어 영역 지우개로 넘어간 동안에는
-  /// 실제로 하는 일과 같게 영역 지우개 커서를 보여 준다.
-  DrawingToolState get _cursorToolState => _strokeEraseFallbackActive
-      ? DrawingToolState(
-          instrument: DrawingInstrument.eraser,
-          eraserMode: DrawingEraserMode.area,
-          color: _toolState.color,
-          width: _toolState.width,
-        )
-      : _toolState;
-
   /// 커서가 보이는 중이면 바뀐 도구·굵기를 즉시 반영한다.
   void _refreshVisibleCursor() {
     final cursor = _cursorController.value;
     if (!cursor.visible) return;
     _cursorController.update(
       documentPosition: cursor.documentPosition,
-      toolState: _cursorToolState,
+      toolState: _toolState,
       deviceKind: cursor.deviceKind,
     );
   }
@@ -794,7 +779,6 @@ class _DrawingScreenState extends State<DrawingScreen>
     setState(() {
       _toolState = DrawingToolState(
         instrument: instrument,
-        eraserMode: _toolState.eraserMode,
         color: _toolState.color,
         width: _toolState.width,
       );
@@ -811,7 +795,6 @@ class _DrawingScreenState extends State<DrawingScreen>
     setState(() {
       _toolState = DrawingToolState(
         instrument: _toolState.instrument,
-        eraserMode: _toolState.eraserMode,
         color: nextColor,
         width: _toolState.width,
       );
@@ -836,63 +819,12 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
     _cursorController.update(
       documentPosition: event.localPosition,
-      toolState: _cursorToolState,
+      toolState: _toolState,
       deviceKind: event.kind,
     );
   }
 
   void _handleCanvasExit(PointerEvent event) => _cursorController.hide();
-
-  void _setEraserMode(DrawingEraserMode mode) {
-    setState(() {
-      _toolState = DrawingToolState(
-        instrument: DrawingInstrument.eraser,
-        eraserMode: mode,
-        color: _toolState.color,
-        width: _toolState.width,
-      );
-    });
-    _syncCoordinator.recordToolChange(_toolState.wireToolCode);
-    _refreshVisibleCursor();
-  }
-
-  void _handleEraserMenuAction(DrawingEraserMenuAction action) {
-    _tutorialPractice.mark(CanvasTutorialTargetId.eraser);
-    switch (action) {
-      case DrawingEraserMenuAction.selectStroke:
-        _setEraserMode(DrawingEraserMode.stroke);
-      case DrawingEraserMenuAction.selectArea:
-        _setEraserMode(DrawingEraserMode.area);
-      case DrawingEraserMenuAction.clearAll:
-        unawaited(_confirmClearAll());
-    }
-  }
-
-  /// 전체 지우기는 되돌릴 수 없어 아이에게 큰 변화라 한 번 확인한다.
-  Future<void> _confirmClearAll() async {
-    if (_isApplyingRasterMutation) return;
-    final confirmed = await showAppConfirmDialog(
-      context: context,
-      title: '그림을 모두 지울까요?',
-      message: '지운 그림은 되돌릴 수 없어요.',
-      confirmLabel: '모두 지우기',
-      cancelLabel: '계속 그리기',
-      isDanger: true,
-    );
-    if (confirmed != true || !mounted) return;
-    await _runSnapshotMutation((_) async {
-      // 복원된 그림만 남아 있어도 지울 것이 있는 상태다.
-      final hadRestoredPixels = _draftRestoreController.backgroundImage != null;
-      final localChange = _documentController.clearAll();
-      if (!localChange.changed && !hadRestoredPixels) return _noDocumentChange;
-      if (hadRestoredPixels) _draftRestoreController.startNewDrawing();
-      _syncCoordinator.recordCanvasClear();
-      return const DrawingDocumentChange(
-        changed: true,
-        wireEffect: DrawingWireEffect.none,
-      );
-    }, revisionAlreadyRecorded: true);
-  }
 
   /// 상세 색상 팔레트를 연다. 태블릿은 팔레트 버튼 옆 팝오버, 모바일은 바텀 시트다.
   Future<void> _openColorPalette(DrawingCanvasDeviceClass deviceClass) async {
@@ -970,7 +902,6 @@ class _DrawingScreenState extends State<DrawingScreen>
     setState(() {
       _toolState = DrawingToolState(
         instrument: _toolState.instrument,
-        eraserMode: _toolState.eraserMode,
         color: _toolState.color,
         width: thickness,
       );
@@ -1972,12 +1903,8 @@ class _DrawingScreenState extends State<DrawingScreen>
       case DrawingInstrument.pencil:
       case DrawingInstrument.brush:
         _beginSupportedStroke(event, DrawingTool.pen);
-      case DrawingInstrument.eraser
-          when _toolState.eraserMode == DrawingEraserMode.area:
-        _beginSupportedStroke(event, DrawingTool.eraser);
       case DrawingInstrument.eraser:
-        if (_isApplyingRasterMutation) return;
-        _beginStrokeEraseGesture(event);
+        _beginSupportedStroke(event, DrawingTool.eraser);
       case DrawingInstrument.fill:
         if (_isApplyingRasterMutation) return;
         unawaited(_applyFill(event.localPosition));
@@ -1998,68 +1925,12 @@ class _DrawingScreenState extends State<DrawingScreen>
     });
   }
 
-  /// 획 지우개는 지운 결과를 event 로 표현할 수 없어 스냅샷으로만 남는다.
-  /// 제스처 한 번이 undo 한 번이 되도록 컨트롤러에 묶음을 열어 둔다.
-  void _beginStrokeEraseGesture(PointerDownEvent event) {
-    setState(() {
-      _isApplyingRasterMutation = true;
-      _rasterMutationAllowsDrawing = false;
-      _isStrokeEraseGestureActive = true;
-      _strokeEraseFallbackActive = false;
-      _activePointer = event.pointer;
-      _activeStroke = null;
-    });
-    _beginDrawingInput();
-    _documentController.beginStrokeEraseGesture();
-    try {
-      _eraseStrokeOrStartFallback(event);
-    } on Object {
-      _cancelStrokeEraseGesture();
-      rethrow;
-    }
-  }
-
-  /// 지울 획이 없고 복원된 그림만 남아 있으면 그 위를 영역 지우개로 문지른다.
-  void _eraseStrokeOrStartFallback(PointerEvent event) {
-    if (_strokeEraseFallbackActive) {
-      setState(() {
-        _activeStroke = _activeStroke!.addPoint(_pointFrom(event));
-      });
-      _updateCursor(event);
-      return;
-    }
-    final removed = _documentController.eraseStrokeAt(
-      event.localPosition,
-      radius: _toolState.width / 2,
-    );
-    if (removed || _draftRestoreController.backgroundImage == null) return;
-    setState(() {
-      _strokeEraseFallbackActive = true;
-      _activeStroke = DrawingStroke(
-        points: [_pointFrom(event)],
-        color: _toolState.color,
-        thickness: _toolState.width,
-        tool: DrawingTool.eraser,
-      );
-    });
-    _updateCursor(event);
-  }
-
   void _extendStroke(PointerMoveEvent event) {
     if (_activePointer != event.pointer) {
       _cursorController.hide();
       return;
     }
     _updateCursor(event);
-    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
-      try {
-        _eraseStrokeOrStartFallback(event);
-      } on Object {
-        _cancelStrokeEraseGesture();
-        rethrow;
-      }
-      return;
-    }
     if (_activeStroke == null) return;
     setState(() {
       _activeStroke = _activeStroke!.addPoint(_pointFrom(event));
@@ -2069,10 +1940,6 @@ class _DrawingScreenState extends State<DrawingScreen>
   void _endStroke(PointerEvent event) {
     if (_activePointer != event.pointer) {
       _cursorController.hide();
-      return;
-    }
-    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
-      unawaited(_finishStrokeEraseGesture(event));
       return;
     }
     final stroke = _activeStroke;
@@ -2096,80 +1963,6 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
-  Future<void> _finishStrokeEraseGesture(PointerEvent event) async {
-    var change = const DrawingDocumentChange(
-      changed: false,
-      wireEffect: DrawingWireEffect.none,
-    );
-    try {
-      if (event is PointerCancelEvent) {
-        _documentController.cancelStrokeEraseGesture();
-      } else {
-        change = _documentController.endStrokeEraseGesture(
-          fallbackStroke: _strokeEraseFallbackActive ? _activeStroke : null,
-        );
-        if (change.wireStroke case final wireStroke?) {
-          _syncCoordinator.recordStroke(wireStroke, _documentSize);
-        }
-      }
-      if (mounted) {
-        setState(() {
-          _activeStroke = null;
-          _activePointer = null;
-        });
-      } else {
-        _activeStroke = null;
-        _activePointer = null;
-      }
-      if (change.changed) {
-        await _persistRasterChange(
-          change,
-          revisionAlreadyRecorded: change.wireStroke != null,
-          // 획 지우개 제스처는 이벤트를 남기지 않지만 문서에서는 되돌릴 수 있는
-          // 변경 하나다. journal이 이를 모르면 뒤이은 UNDO가 이벤트로 나가지 않는다.
-          undoableSnapshotChange: true,
-        );
-      }
-    } on Object {
-      _documentController.cancelStrokeEraseGesture();
-      rethrow;
-    } finally {
-      _releaseStrokeEraseGesture(event);
-    }
-  }
-
-  void _cancelStrokeEraseGesture() {
-    _documentController.cancelStrokeEraseGesture();
-    _activeStroke = null;
-    _activePointer = null;
-    _releaseStrokeEraseGesture(null);
-  }
-
-  void _releaseStrokeEraseGesture(PointerEvent? event) {
-    if (!_isStrokeEraseGestureActive) return;
-    _endDrawingInput();
-    if (!mounted) {
-      _isStrokeEraseGestureActive = false;
-      _strokeEraseFallbackActive = false;
-      _isApplyingRasterMutation = false;
-      _rasterMutationAllowsDrawing = false;
-      return;
-    }
-    setState(() {
-      _isStrokeEraseGestureActive = false;
-      _strokeEraseFallbackActive = false;
-      _isApplyingRasterMutation = false;
-      _rasterMutationAllowsDrawing = false;
-    });
-    if (event == null ||
-        event is PointerCancelEvent ||
-        event.kind == ui.PointerDeviceKind.touch) {
-      _cursorController.hide();
-    } else {
-      _updateCursor(event);
-    }
-  }
-
   /// 문서 밖으로 나간 포인터는 커서를 숨긴다.
   ///
   /// 터치도 그리는 동안에는 커서를 보여 준다. 손을 떼고 나면 [_endStroke] 가
@@ -2186,7 +1979,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
     _cursorController.update(
       documentPosition: event.localPosition,
-      toolState: _cursorToolState,
+      toolState: _toolState,
       deviceKind: event.kind,
     );
   }
@@ -2307,12 +2100,8 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 화면 크기·방향이 바뀌면 진행 중인 입력은 좌표 기준이 달라져 이어 갈 수 없다.
   ///
-  /// 그리던 획은 현재 점까지 완결하고, 아직 확정되지 않은 획 지우기는 되돌린다.
+  /// 그리던 획은 현재 점까지 완결한다.
   void _finishActiveStrokeForLayoutChange() {
-    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
-      _cancelStrokeEraseGesture();
-      return;
-    }
     if (_activeStroke == null) return;
     _finishActiveStrokeForSave();
     _cursorController.hide();
@@ -2969,7 +2758,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                         instrument: tool == DrawingTool.eraser
                             ? DrawingInstrument.eraser
                             : DrawingInstrument.crayon,
-                        eraserMode: DrawingEraserMode.area,
                         color: _toolState.color,
                         width: _toolState.width,
                       );
@@ -3038,7 +2826,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                   onRedo: _redoLastStroke,
                   onRetrySave: () => unawaited(_syncCoordinator.retry()),
                   onInstrumentChanged: _setInstrument,
-                  onEraserMenuAction: _handleEraserMenuAction,
                   onColorChanged: _setColor,
                   onWidthChanged: _setThickness,
                   onOpenPalette: () =>

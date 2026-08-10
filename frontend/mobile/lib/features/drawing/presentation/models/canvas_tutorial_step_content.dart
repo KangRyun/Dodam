@@ -71,7 +71,7 @@ final class CanvasTutorialStepContent {
     CanvasTutorialStep.eraser => CanvasTutorialStepContent(
       step: step,
       title: '지우개로 고쳐요',
-      description: '지우개를 누르면 선 지우개·영역 지우개·전체 지우기를 고를 수 있어요.',
+      description: '지우개를 누르고 굵기를 조절해 원하는 부분을 지워 보세요.',
       target: CanvasTutorialTargetId.eraser,
       allowsTargetTap: true,
       practiceLabel: '지우개를 눌러 보기',

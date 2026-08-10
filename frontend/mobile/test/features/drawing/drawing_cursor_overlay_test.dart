@@ -28,7 +28,6 @@ void main() {
     addTearDown(controller.dispose);
     const toolState = DrawingToolState(
       instrument: DrawingInstrument.eraser,
-      eraserMode: DrawingEraserMode.stroke,
       color: Colors.red,
       width: 24,
     );
@@ -42,7 +41,6 @@ void main() {
     expect(controller.value.visible, isTrue);
     expect(controller.value.documentPosition, const Offset(123, 456));
     expect(controller.value.instrument, DrawingInstrument.eraser);
-    expect(controller.value.eraserMode, DrawingEraserMode.stroke);
     expect(controller.value.documentWidth, 24);
     expect(controller.value.deviceKind, ui.PointerDeviceKind.stylus);
 
@@ -58,7 +56,6 @@ void main() {
       visible: true,
       documentPosition: Offset(100, 80),
       instrument: DrawingInstrument.brush,
-      eraserMode: DrawingEraserMode.area,
       documentWidth: 24,
       deviceKind: ui.PointerDeviceKind.mouse,
     );
@@ -96,7 +93,6 @@ void main() {
       visible: true,
       documentPosition: Offset(200, 100),
       instrument: DrawingInstrument.fill,
-      eraserMode: DrawingEraserMode.area,
       documentWidth: 32,
       deviceKind: ui.PointerDeviceKind.mouse,
     );
@@ -394,7 +390,6 @@ const _hiddenCursorState = DrawingCursorState(
   visible: false,
   documentPosition: Offset.zero,
   instrument: DrawingInstrument.crayon,
-  eraserMode: DrawingEraserMode.area,
   documentWidth: 8,
   deviceKind: ui.PointerDeviceKind.touch,
 );
@@ -421,10 +416,8 @@ final class _CursorConversationRepository implements ConversationRepository {
     required int drawingSessionId,
     int? analysisId,
     required String idempotencyKey,
-  }) async => const ConversationStartResult(
-    conversationId: 8001,
-    maxQuestionCount: 5,
-  );
+  }) async =>
+      const ConversationStartResult(conversationId: 8001, maxQuestionCount: 5);
 
   @override
   Future<AiQuestion> requestNextQuestion({

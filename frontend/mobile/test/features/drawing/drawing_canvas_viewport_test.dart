@@ -84,7 +84,6 @@ void main() {
                     visible: true,
                     documentPosition: Offset(512, 384),
                     instrument: DrawingInstrument.brush,
-                    eraserMode: DrawingEraserMode.area,
                     documentWidth: 64,
                     deviceKind: PointerDeviceKind.mouse,
                   ),
