@@ -8,7 +8,7 @@ node_modules
 out
 
 # 테스트·개발 산출물 — 런타임 이미지와 무관하다.
-tests
+tests/e2e
 playwright-report
 test-results
 .playwright
