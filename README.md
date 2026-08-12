@@ -11,7 +11,7 @@
 <div align="center">
 
 
-<img src="build-artifacts/store/feature-graphic-1024x578.png" alt="도담 배너" width="800"/>
+<img src="docs/readme/hero.png" alt="도담 배너" width="800"/>
 
 
 
@@ -91,35 +91,25 @@
 
 ## 🎬 서비스 화면
 
-<!-- 
-  TODO: 기능별 GIF/스크린샷을 docs/readme/ 에 넣고 아래 경로를 채워주세요.
-  권장 크기: GIF 600px 폭, 스크린샷 300px 폭
-  파일명 예시: 01_login.gif, 02_child_mode.gif, ...
--->
+### 보호자 모드
 
-### 보호자 온보딩
-
-| 소셜 로그인 | 아동 등록 | 보호자 홈 |
+| 아동 선택 | 보호자 홈 | 활동 시작 안내 |
 |:-:|:-:|:-:|
-| ![로그인](docs/readme/placeholder.png) | ![아동등록](docs/readme/placeholder.png) | ![보호자홈](docs/readme/placeholder.png) |
+| ![아동선택](docs/readme/screens/아동선택.png) | ![보호자홈](docs/readme/screens/보호자홈.png) | ![활동시작](docs/readme/screens/활동시작안내.png) |
 
-### 아동 활동 (핵심)
-
-| 캔버스 그리기 | AI 캐릭터 대화 | 감정 선택 |
+| 아동 등록 | 활동 기록 | 커뮤니티 |
 |:-:|:-:|:-:|
-| ![그리기](docs/readme/placeholder.png) | ![대화](docs/readme/placeholder.png) | ![감정선택](docs/readme/placeholder.png) |
+| ![아동등록](docs/readme/screens/아동등록.png) | ![활동기록](docs/readme/screens/활동기록.png) | ![커뮤니티](docs/readme/screens/community.png) |
 
-### 관찰 리포트
+### 아동 모드 (핵심)
 
-| 리포트 열람 | PDF 다운로드 |
+| 아동 홈 | 캔버스 그리기 | AI 캐릭터 대화 |
+|:-:|:-:|:-:|
+| ![아동홈](docs/readme/screens/아동홈.png) | ![그리기](docs/readme/screens/캔버스그리기.png) | ![대화](docs/readme/screens/AI캐릭터대화.png) |
+
+| 감정 선택 | 활동 완료 |
 |:-:|:-:|
-| ![리포트](docs/readme/placeholder.png) | ![PDF](docs/readme/placeholder.png) |
-
-### 커뮤니티 (웹)
-
-| 게시판 | 글 작성 |
-|:-:|:-:|
-| ![게시판](docs/readme/placeholder.png) | ![글작성](docs/readme/placeholder.png) |
+| ![감정선택](docs/readme/screens/감정선택.png) | ![활동완료](docs/readme/screens/활동완료.png) |
 
 ---
 
@@ -174,8 +164,6 @@
 
 ## 🏛 시스템 아키텍처
 
-<!-- TODO: 아키텍처 다이어그램 이미지를 docs/readme/architecture.png 에 넣어주세요 -->
-
 ![시스템 아키텍처](docs/readme/architecture.png)
 
 <details>
@@ -209,8 +197,6 @@
 ---
 
 ## 🗄 ERD
-
-<!-- TODO: ERD 이미지를 docs/readme/erd.png 에 넣어주세요 -->
 
 ![ERD](docs/readme/erd.png)
 
@@ -287,7 +273,7 @@
 
 <div align="center">
 
-<img src="build-artifacts/store/icon-512.png" alt="도담 아이콘" width="80"/>
+<img src="docs/readme/icon.png" alt="도담 아이콘" width="80"/>
 
 **도담** — 아이의 마음을 그림으로 만나요
 
