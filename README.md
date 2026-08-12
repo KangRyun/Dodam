@@ -1,13 +1,26 @@
+## 👨‍👩‍👧‍👦 팀원 소개
+
 <div align="center">
 
+| | | | | | |
+|:-:|:-:|:-:|:-:|:-:|:-:|
+| **강병구** | **이강륜** | **오민근** | **편주희** | **안윤주** | **장우창** |
+| Backend · Frontend · AI | Infra · AI · Backend | Backend · Frontend | AI · Frontend | Frontend (Mobile · Web) | Frontend (Mobile · Web) |
+| [@byegu](https://github.com/byegu) | [@KangRyun](https://github.com/KangRyun) | [@mingeunoh5312-svg](https://github.com/mingeunoh5312-svg) | [@jewjd0](https://github.com/jewjd0) | [@dbswn58](https://github.com/dbswn58) | [@JejuTangerine](https://github.com/JejuTangerine) |
+
+<div align="center">
+
+
 <img src="build-artifacts/store/feature-graphic-1024x578.png" alt="도담 배너" width="800"/>
+
+
 
 ### 아이의 마음을 그림으로 만나요
 
 만 4~12세 아동이 그림과 대화를 통해 생각과 감정을 표현하도록 돕고,<br/>
 보호자와 전문가에게 활동 기록과 AI 관찰 리포트를 제공하는 서비스입니다.
 
-**SSAFY 15기 자율 프로젝트 · B209**<br/>
+**SSAFY 15기 공통 프로젝트**<br/>
 2026.07.07 ~ 2026.08.15
 
 </div>
@@ -73,7 +86,6 @@
 | **관찰 리포트** | 그림·대화·과정 종합 분석, 근거·확신도 표기, PDF 다운로드 |
 | **위험 신호 감지** | 감지 시 보호자에게만 안내 (아동 화면 비노출) |
 | **커뮤니티 (웹)** | 게시판(보호자 이야기/칼럼/전문가 Q&A/공지) |
-| **관리자 콘솔 (웹)** | 사용자·신고·콘텐츠 관리, 전문가 심사, AI 질문 관리 |
 
 ---
 
@@ -269,19 +281,6 @@
 | 발표 자료 | <!-- TODO: 링크 --> |
 
 ---
-
-## 👨‍👩‍👧‍👦 팀원 소개
-
-<!-- TODO: 팀원 정보를 채워주세요 -->
-
-<div align="center">
-
-| | | | | | |
-|:-:|:-:|:-:|:-:|:-:|:-:|
-| **이름** | **이름** | **이름** | **이름** | **이름** | **이름** |
-| 역할 | 역할 | 역할 | 역할 | 역할 | 역할 |
-| [@github](https://github.com/) | [@github](https://github.com/) | [@github](https://github.com/) | [@github](https://github.com/) | [@github](https://github.com/) | [@github](https://github.com/) |
-
 </div>
 
 ---
