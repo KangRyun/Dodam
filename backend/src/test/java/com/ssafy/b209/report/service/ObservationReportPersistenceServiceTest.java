@@ -38,6 +38,10 @@ import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
 import com.ssafy.b209.report.domain.ReportActivitySummary;
 import com.ssafy.b209.report.domain.ReportDiaryCaregiverQuestion;
+import com.ssafy.b209.report.domain.ReportDiaryInsight;
+import com.ssafy.b209.report.domain.ReportDiaryStoryComponent;
+import com.ssafy.b209.report.domain.ReportDiaryTranscriptEntry;
+import com.ssafy.b209.report.domain.ReportDiaryVisualObservation;
 import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportGuardianQuestion;
@@ -48,7 +52,11 @@ import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryCaregiverQuestionDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDataScopeDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDrawingObservationDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryEvidenceRefDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryInsightsDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryStoryComponentDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.FollowUpGuideDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.GuardianQuestionDraft;
@@ -66,7 +74,10 @@ import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
 import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
 import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
+import com.ssafy.b209.report.repository.ReportDiaryStoryComponentRepository;
+import com.ssafy.b209.report.repository.ReportDiaryTranscriptEntryRepository;
 import com.ssafy.b209.report.repository.ReportDiaryUnknownItemRepository;
+import com.ssafy.b209.report.repository.ReportDiaryVisualObservationRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
 import com.ssafy.b209.report.repository.ReportGuardianQuestionRepository;
@@ -144,6 +155,11 @@ class ObservationReportPersistenceServiceTest {
 
   @Mock private ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
   @Mock private ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
+  @Mock private ReportDiaryStoryComponentRepository diaryStoryComponentRepository;
+  @Mock private ReportDiaryVisualObservationRepository diaryVisualObservationRepository;
+  @Mock private ReportDiaryTranscriptEntryRepository diaryTranscriptEntryRepository;
+  private final DiaryTranscriptSnapshotFactory diaryTranscriptSnapshotFactory =
+      new DiaryTranscriptSnapshotFactory();
   @Mock private ReportGuardianQuestionRepository guardianQuestionRepository;
   @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private ConversationMessageRepository conversationMessageRepository;
@@ -159,6 +175,10 @@ class ObservationReportPersistenceServiceTest {
   @Captor private ArgumentCaptor<List<ReportActivityNote>> notesCaptor;
   @Captor private ArgumentCaptor<List<ReportDrawnItem>> drawnItemsCaptor;
   @Captor private ArgumentCaptor<List<ReportDiaryCaregiverQuestion>> caregiverQuestionsCaptor;
+  @Captor private ArgumentCaptor<ReportDiaryInsight> diaryInsightCaptor;
+  @Captor private ArgumentCaptor<List<ReportDiaryStoryComponent>> storyComponentsCaptor;
+  @Captor private ArgumentCaptor<List<ReportDiaryVisualObservation>> visualObservationsCaptor;
+  @Captor private ArgumentCaptor<List<ReportDiaryTranscriptEntry>> transcriptEntriesCaptor;
   @Captor private ArgumentCaptor<List<ReportObservedFeature>> featuresCaptor;
   @Captor private ArgumentCaptor<List<ReportKeyConversation>> keyConversationsCaptor;
   @Captor private ArgumentCaptor<List<ReportGuardianQuestion>> guardianQuestionsCaptor;
@@ -202,6 +222,10 @@ class ObservationReportPersistenceServiceTest {
             diaryDevelopmentalObservationRepository,
             diaryDevelopmentSourceRepository,
             diaryUnknownItemRepository,
+            diaryStoryComponentRepository,
+            diaryVisualObservationRepository,
+            diaryTranscriptEntryRepository,
+            diaryTranscriptSnapshotFactory,
             guardianQuestionRepository,
             conversationSessionRepository,
             conversationMessageRepository,
@@ -270,6 +294,48 @@ class ObservationReportPersistenceServiceTest {
     assertThat(card.getConnectionType()).isEqualTo("FEELING_SHARING");
     assertThat(card.getResponseGuide()).contains("마음을 그대로 받아 주세요");
     assertThat(card.getCoRegulationAction()).contains("같이 그려 볼까요");
+  }
+
+  @Test
+  void persistsV3ScopeStoryComponentsVisualObservationsAndTranscript() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    ObservationGenerationContext context =
+        context(
+            List.of(
+                new ObservationGenerationContext.KeyConversationLine(
+                    11L,
+                    "누구와 함께 있었어?",
+                    21L,
+                    "친구랑 놀았어요",
+                    "VOICE_ANSWER",
+                    false,
+                    "SUCCESS",
+                    true,
+                    LocalDateTime.of(2026, 8, 9, 10, 15))));
+    service.complete(context, new ObservationGeneration(resultWithV3DiaryInsights(), null));
+
+    verify(diaryInsightRepository).save(diaryInsightCaptor.capture());
+    assertThat(diaryInsightCaptor.getValue().getSchemaVersion()).isEqualTo(3);
+    assertThat(diaryInsightCaptor.getValue().getEvidenceLevel()).isEqualTo("PARTIAL");
+    assertThat(diaryInsightCaptor.getValue().getVisualObservationCount()).isEqualTo(1);
+    verify(diaryStoryComponentRepository).saveAll(storyComponentsCaptor.capture());
+    assertThat(storyComponentsCaptor.getValue())
+        .extracting(ReportDiaryStoryComponent::getComponentType)
+        .containsExactly("EVENT", "EMOTION");
+    verify(diaryVisualObservationRepository).saveAll(visualObservationsCaptor.capture());
+    assertThat(visualObservationsCaptor.getValue())
+        .singleElement()
+        .extracting(ReportDiaryVisualObservation::getText)
+        .isEqualTo("화면 중앙에 두 사람이 나란히 있어요.");
+    verify(diaryTranscriptEntryRepository).saveAll(transcriptEntriesCaptor.capture());
+    assertThat(transcriptEntriesCaptor.getValue())
+        .singleElement()
+        .extracting(ReportDiaryTranscriptEntry::getResponseType)
+        .isEqualTo("VOICE");
   }
 
   @Test
@@ -901,6 +967,60 @@ class ObservationReportPersistenceServiceTest {
     verify(analysis.getDrawingSession(), never()).failReporting();
   }
 
+  /**
+   * 최종 실패는 보호자에게 알린다.
+   *
+   * <p>아이 화면은 리포트를 기다리지 않고 넘어가므로, 알리지 않으면 실패가 아무 데도 뜨지 않는다.
+   */
+  @Test
+  void publishesFailureEventWhenReportFailsFinally() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_FINAL);
+
+    verify(eventPublisher).publishEvent(new ReportGenerationFailedEvent(REPORT_ID));
+  }
+
+  /**
+   * 재시도 가능한 실패는 알리지 않는다.
+   *
+   * <p>재시도 작업이 되살릴 수 있고 보호자 화면에도 '분석 중'으로 보인다. 알리면 "만들지 못했어요" 뒤에 "완료됐어요"가 따라붙어, 할 일이 없는 보호자에게 불안만
+   * 남는다.
+   */
+  @Test
+  void doesNotPublishFailureEventForRetryableFailure() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_RETRYABLE);
+
+    verify(eventPublisher, never()).publishEvent(any());
+  }
+
+  /**
+   * 이미 실패로 내려간 리포트를 다시 실패시켜도 두 번 알리지 않는다.
+   *
+   * <p>보호자에게 같은 실패로 알림이 두 번 가면 리포트가 두 번 실패한 것처럼 보인다. 중복은 GENERATING 필터가 막는다.
+   */
+  @Test
+  void doesNotPublishFailureEventTwiceForSameReport() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_FINAL);
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_FINAL);
+
+    verify(eventPublisher, org.mockito.Mockito.times(1))
+        .publishEvent(new ReportGenerationFailedEvent(REPORT_ID));
+  }
+
   @Test
   void marksHtpAggregateFailedWithoutFailingCompletedPersonSession() {
     DrawingAnalysis analysis = pendingAnalysis();
@@ -1408,6 +1528,49 @@ class ObservationReportPersistenceServiceTest {
             List.of(),
             List.of(),
             null);
+    return new ObservationGenerationResult(
+        source.requestId(),
+        source.modelName(),
+        source.modelVersion(),
+        source.confidence(),
+        source.observationDraft(),
+        source.conversationSummary(),
+        source.activityNotes(),
+        source.followUpGuides(),
+        source.guardianQuestions(),
+        source.limitationsText(),
+        source.drawnItems(),
+        source.publicInterpretations(),
+        source.evidenceItems(),
+        source.parentGuides(),
+        source.crisisAlert(),
+        source.subjectReports(),
+        source.ragReferences(),
+        diary);
+  }
+
+  private ObservationGenerationResult resultWithV3DiaryInsights() {
+    ObservationGenerationResult source = validResult();
+    DiaryEvidenceRefDraft visualRef = new DiaryEvidenceRefDraft("DRAWING_OBSERVATION", "301");
+    DiaryInsightsDraft diary =
+        new DiaryInsightsDraft(
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            "아이의 표현을 먼저 그대로 들어 주세요.",
+            List.of(),
+            List.of(),
+            null,
+            3,
+            new DiaryDataScopeDraft("PARTIAL", "확정된 아이 발화와 그림 관찰을 함께 사용했어요.", 1, 0, 0, 0, 1),
+            List.of(
+                new DiaryStoryComponentDraft("EVENT", "CONFIRMED", "친구와 놀았어요.", List.of()),
+                new DiaryStoryComponentDraft("EMOTION", "UNKNOWN", null, List.of())),
+            List.of(
+                new DiaryDrawingObservationDraft(
+                    "화면 중앙에 두 사람이 나란히 있어요.", "HIGH", true, List.of(visualRef))));
     return new ObservationGenerationResult(
         source.requestId(),
         source.modelName(),

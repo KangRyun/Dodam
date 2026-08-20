@@ -26,6 +26,12 @@ cd "$REPO_ROOT"
 IMAGE="${BUILDER_IMAGE:-dodam-flutter-builder:3.44.7}"
 GRADLE_CACHE_VOLUME="${GRADLE_CACHE_VOLUME:-dodam-android-gradle}"
 PUB_CACHE_VOLUME="${PUB_CACHE_VOLUME:-dodam-android-pub}"
+CACHE_SCOPE_RAW="${CACHE_SCOPE:-${JOB_NAME:-local}}"
+CACHE_SCOPE="$(printf '%s' "$CACHE_SCOPE_RAW" | tr -cs '[:alnum:]_.-' '-' | cut -c1-48)"
+DART_TOOL_CACHE_VOLUME="${DART_TOOL_CACHE_VOLUME:-dodam-flutter-dart-tool-${CACHE_SCOPE}}"
+BUILD_CACHE_VOLUME="${BUILD_CACHE_VOLUME:-dodam-flutter-test-build-${CACHE_SCOPE}}"
+ANDROID_PROJECT_CACHE_VOLUME="${ANDROID_PROJECT_CACHE_VOLUME:-dodam-flutter-android-project-${CACHE_SCOPE}}"
+ANDROID_APP_BUILD_VOLUME="${ANDROID_APP_BUILD_VOLUME:-dodam-flutter-android-app-build-${CACHE_SCOPE}}"
 TEST_MEMORY="${TEST_MEMORY:-4g}"
 TEST_MEMORY_SWAP="${TEST_MEMORY_SWAP:-6g}"
 TEST_TARGET="${TEST_TARGET:-}"
@@ -74,23 +80,28 @@ CID="$(docker create \
   --memory-swap "$TEST_MEMORY_SWAP" \
   -v "${GRADLE_CACHE_VOLUME}:/root/.gradle" \
   -v "${PUB_CACHE_VOLUME}:/root/.pub-cache" \
+  -v "${DART_TOOL_CACHE_VOLUME}:/src/.dart_tool" \
+  -v "${BUILD_CACHE_VOLUME}:/src/build" \
+  -v "${ANDROID_PROJECT_CACHE_VOLUME}:/src/android/.gradle" \
+  -v "${ANDROID_APP_BUILD_VOLUME}:/src/android/app/build" \
   "$IMAGE" \
   bash -c "
     set -e
     cd /src
-    # 호스트 잔재 정리 — docker cp 는 .gitignore 를 모르고 작업 트리를 통째로 가져온다.
-    #   android/local.properties 에는 **호스트의** flutter.sdk 경로가 박혀 있어
-    #   컨테이너 안에서는 없는 경로를 가리킨다.
+    # 주입 단계가 호스트 산출물을 제외하므로 job별 named volume의 증분 캐시만 남는다.
+    # local.properties는 SDK 절대경로라 컨테이너가 자기 경로로 다시 생성해야 한다.
     rm -f android/local.properties
-    rm -rf build .dart_tool android/.gradle android/app/build
     echo '── flutter pub get'
     flutter pub get
     echo '── flutter test ${TEST_TARGET}'
     flutter test ${TEST_TARGET} --reporter compact
   ")"
 
-log "소스 주입 (docker cp — bind mount 아님)"
-docker cp "$REPO_ROOT/frontend/mobile/." "$CID:/src/" >/dev/null
+log "소스 주입 (호스트 산출물 제외 · docker cp 스트림)"
+tar -C "$REPO_ROOT/frontend/mobile" \
+  --exclude='./build' --exclude='./.dart_tool' \
+  --exclude='./android/.gradle' --exclude='./android/app/build' \
+  -cf - . | docker cp - "$CID:/src/"
 
 log "테스트 실행"
 docker start -a "$CID"

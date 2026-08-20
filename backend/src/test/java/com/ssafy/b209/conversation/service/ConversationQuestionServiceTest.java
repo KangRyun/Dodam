@@ -292,10 +292,44 @@ class ConversationQuestionServiceTest {
     // 재개 후 상한을 미리 싣는다. 옛 상한(=이미 던진 질문 수)을 그대로 보내면 AI가 '마지막 차례'로
     //   읽어, 대화를 다시 여는 바로 그 질문이 맺음말로 나온다.
     assertThat(requestCaptor.getValue().maxQuestionCount()).isEqualTo(10);
+    // 재개 턴이라는 사실도 함께 싣는다. 이걸 안 보내면 AI가 이력에 남은 묵은 종료 의사를 지금 한
+    //   대답으로 읽고 맺음말·종료 확인 신호를 돌려줘, 방금 다시 연 대화가 곧바로 닫힌다.
+    assertThat(requestCaptor.getValue().resumedByNewDrawing()).isTrue();
     ArgumentCaptor<QuestionCandidate> candidateCaptor =
         ArgumentCaptor.forClass(QuestionCandidate.class);
     verify(questionPersistenceService).save(eq(1L), candidateCaptor.capture());
     // 재개 허가를 저장 계층까지 값으로 들려 보낸다 — 잠금 안에서 활동 유형을 다시 조회하지 않는다.
+    assertThat(candidateCaptor.getValue().reopenAllowed()).isTrue();
+  }
+
+  @Test
+  void doesNotClaimANewDrawingTurnWhenTheChildAnswerTriggeredIt() {
+    // 경계 고정: 재개가 허용되는 상태에서도 아이가 방금 답을 남겼다면 이 턴을 부른 것은 그림이 아니라
+    //   아이의 말이다. 그때 플래그를 켜면 AI가 지금 막 들어온 진짜 "그만할래"를 묵은 의사로 보고
+    //   흘려버려, 고치려던 버그를 반대 방향으로 되풀이한다.
+    //   앱은 재개 호출에 답변 식별자를 싣지 않으므로 실제로 갈릴 일은 드물지만, 방어선을 앱의 행동
+    //   하나에 걸지 않는다 — 앱이 한 줄 바뀌면 조용히 무너지는 안전은 안전이 아니다.
+    given(session.isCompleted()).willReturn(true);
+    given(session.isReopenEligible(ConversationQuestionLimitProperties.ABSOLUTE_MAX))
+        .willReturn(true);
+    given(session.reopenedMaxQuestionCount(5, ConversationQuestionLimitProperties.ABSOLUTE_MAX))
+        .willReturn(10);
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(27L, "무엇을 그리고 있니?", false));
+
+    service.generateQuestion(
+        artDiaryCommand(List.of(ResponseMode.VOICE, ResponseMode.OPTION), true, 88L));
+
+    ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> requestCaptor =
+        ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
+    verify(aiQuestionClient).generate(requestCaptor.capture(), any());
+    assertThat(requestCaptor.getValue().resumedByNewDrawing()).isFalse();
+    // 다시 여는 것 자체는 그대로 허용한다 — 두 값은 묻는 것이 다르다. 저장 계층의 재개 허가는
+    //   "이 대화를 다시 열어도 되는가"라 아이가 답을 남겼든 아니든 답이 같다.
+    ArgumentCaptor<QuestionCandidate> candidateCaptor =
+        ArgumentCaptor.forClass(QuestionCandidate.class);
+    verify(questionPersistenceService).save(eq(1L), candidateCaptor.capture());
     assertThat(candidateCaptor.getValue().reopenAllowed()).isTrue();
   }
 
@@ -343,10 +377,15 @@ class ConversationQuestionServiceTest {
 
     ArgumentCaptor<QuestionCandidate> candidateCaptor =
         ArgumentCaptor.forClass(QuestionCandidate.class);
-    verify(aiQuestionClient).generate(any(), any());
+    ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> requestCaptor =
+        ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
+    verify(aiQuestionClient).generate(requestCaptor.capture(), any());
     verify(questionPersistenceService).save(eq(1L), candidateCaptor.capture());
     // 재개가 아니므로 저장 계층에도 재개 허가를 넘기지 않는다.
     assertThat(candidateCaptor.getValue().reopenAllowed()).isFalse();
+    // AI에도 재개가 아니라고 알린다. 그림일기(재개 가능한 유형)지만 진행 중인 대화이므로, 활동
+    //   유형만 보고 켜지는 값이 아니라는 것까지 여기서 잠근다.
+    assertThat(requestCaptor.getValue().resumedByNewDrawing()).isFalse();
   }
 
   @Test
@@ -531,6 +570,19 @@ class ConversationQuestionServiceTest {
    */
   private GenerateQuestionCommand artDiaryCommand(
       List<ResponseMode> responseModes, boolean drawingActivityOpen) {
+    return artDiaryCommand(responseModes, drawingActivityOpen, null);
+  }
+
+  /**
+   * 그림일기 명령에 활동 단계 판정과 부모 답변 식별자를 실어 만든다.
+   *
+   * @param responseModes 허용 응답 방식
+   * @param drawingActivityOpen 그림 활동이 아직 대화를 더 받을 수 있는 단계인지 여부
+   * @param previousAnswerMessageId 이 턴을 촉발한 아이 답변의 식별자이며, 새 그림이 부른 턴이면 {@code null}
+   * @return 질문 생성 명령
+   */
+  private GenerateQuestionCommand artDiaryCommand(
+      List<ResponseMode> responseModes, boolean drawingActivityOpen, Long previousAnswerMessageId) {
     return new GenerateQuestionCommand(
         1L,
         9L,
@@ -540,7 +592,7 @@ class ConversationQuestionServiceTest {
         List.of(new DetectedObject("TREE", "나무", 0.9, new BoundingBox(0.1, 0.2, 0.3, 0.4))),
         List.of(),
         "safety-2026-07",
-        null,
+        previousAnswerMessageId,
         "ART_DIARY",
         null,
         List.of(),

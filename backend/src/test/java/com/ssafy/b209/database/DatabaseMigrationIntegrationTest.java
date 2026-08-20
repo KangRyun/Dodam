@@ -52,7 +52,7 @@ class DatabaseMigrationIntegrationTest {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
     // ⚠️ 마이그레이션을 추가하면 이 숫자와 아래 tableCount() 를 함께 확인해야 한다. 960 이 V40 을 더하고
     //    두 숫자를 안 고쳐 CI 가 깨졌다.
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("52");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("53");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     // V40이 주제별 관찰 4종(report_subjects·observations·qa_pairs·interpretations)과
     // report_references 를 더해 85 → 90 이 됐다(S15P11B209-960).
@@ -76,7 +76,15 @@ class DatabaseMigrationIntegrationTest {
     // ⚠️ V43 은 983(AI 원문), V44 가 982(확신도)다. 982 는 원래 V43 이었는데 983 이 먼저 머지되며
     //    같은 번호를 써서 밀었다. **Flyway 는 버전이 겹치면 기동 자체가 실패한다** — 리포트 도메인처럼
     //    여러 갈래가 동시에 붙는 곳은 머지 직전에 번호를 다시 확인할 것.
-    assertThat(tableCount()).isEqualTo(104);
+    // V53은 그림일기 V3 정규화 저장 테이블 3종을 추가하므로 전체 테이블 수는 107개다.
+    assertThat(tableCount()).isEqualTo(107);
+    assertThat(tableExists("report_diary_story_components")).isTrue();
+    assertThat(tableExists("report_diary_visual_observations")).isTrue();
+    assertThat(tableExists("report_diary_transcript_entries")).isTrue();
+    assertThat(columnExists("report_diary_insights", "schema_version")).isTrue();
+    assertThat(columnExists("report_diary_insights", "evidence_level")).isTrue();
+    assertThat(columnExists("report_diary_insights", "data_scope_summary")).isTrue();
+    assertThat(columnExists("report_diary_insights", "visual_observation_count")).isTrue();
     // V52 — "오늘 마음 나누기" 교감. connection_type 은 NOT NULL(기본값 GENERAL_CONNECTION), 공감
     // 반응 안내와 함께 해보기는 NULL 허용이다. CHECK 가 교감 5종을 모두 허용해야 한다.
     assertThat(columnExists("report_diary_caregiver_questions", "connection_type")).isTrue();

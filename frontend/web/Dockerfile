@@ -41,7 +41,7 @@ ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ARG NEXT_PUBLIC_NAVER_CLIENT_ID=
 ENV NEXT_PUBLIC_NAVER_CLIENT_ID=$NEXT_PUBLIC_NAVER_CLIENT_ID
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm build
+RUN pnpm test:unit && pnpm build && pnpm test:image-optimizer-smoke
 
 # ── runner: 산출물만. 빌드 도구도 소스도 남기지 않는다 ──────────────────────
 FROM node:24-alpine AS runner

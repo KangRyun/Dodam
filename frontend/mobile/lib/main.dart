@@ -14,6 +14,7 @@ import 'features/child/data/repositories/remote_child_consent_repository.dart';
 import 'features/child/data/repositories/remote_child_repository.dart';
 import 'features/consent/data/repositories/remote_consent_repository.dart';
 import 'features/conversation/conversation.dart';
+import 'features/drawing/data/device_photo_permission_service.dart';
 import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
 import 'features/guardian_pin/data/repositories/remote_guardian_pin_repository.dart';
@@ -24,6 +25,8 @@ import 'features/notification/data/services/firebase_push_gateway.dart';
 import 'features/notification/data/services/local_push_presenter.dart';
 import 'features/notification/data/services/push_background_handler.dart';
 import 'features/notification/domain/services/push_setup.dart';
+import 'features/permission/application/permission_onboarding_controller.dart';
+import 'features/permission/data/secure_permission_onboarding_store.dart';
 import 'features/report/data/repositories/remote_report_repository.dart';
 import 'features/settings/data/repositories/remote_account_withdrawal_repository.dart';
 import 'features/settings/data/repositories/remote_data_retention_repository.dart';
@@ -97,18 +100,30 @@ DodamApp createDefaultApp({
     'HTP_PHOTO_UPLOAD_ENABLED',
     defaultValue: true,
   );
-  // 보호자 홈 진입 PIN gate(S15P11B209-874). 배포 클러스터에
-  // `GUARDIAN_PIN_PEPPER`가 주입돼 PIN API가 `PIN_UNAVAILABLE` 없이 응답하는
-  // 것이 확인되기 전까지 기본 꺼짐 —
-  // flutter run --dart-define=GUARDIAN_PIN_GATE_ENABLED=true 로 켠다.
+  // 보호자 홈 진입 PIN gate(S15P11B209-874). 기본 켜짐 —
+  // 켤 조건으로 걸어 두었던 것(운영 서버에 `GUARDIAN_PIN_PEPPER` 주입 + PIN API가
+  // `PIN_UNAVAILABLE` 없이 응답)을 2026-08-09 실측으로 확인했다:
+  //   GET /api/v1/users/me/guardian-pin → 401(인증 필요). 기능이 죽어 있으면
+  //   여기서 PIN_UNAVAILABLE 이 온다.
+  // 아이가 아동 모드에서 빠져나와 보호자 화면(리포트·설정)에 닿는 길을 막는 장치라,
+  // 기본값이 꺼짐이면 아무도 켜지 않은 채로 남는다.
+  // 문제가 생기면 --dart-define=GUARDIAN_PIN_GATE_ENABLED=false 로 끈다.
   const guardianPinGateEnabled = bool.fromEnvironment(
     'GUARDIAN_PIN_GATE_ENABLED',
-    defaultValue: false,
+    defaultValue: true,
   );
 
   return DodamApp(
     htpPhotoUploadEnabled: htpPhotoUploadEnabled,
     guardianPinGateEnabled: guardianPinGateEnabled,
+    // 로그인 직후 한 번만 세우는 권한 안내. 요청은 각 기능이 이미 쓰는 서비스에
+    // 그대로 위임하므로, 건너뛰거나 거부해도 기존 개별 요청 경로가 살아 있다.
+    permissionOnboarding: PermissionOnboardingController(
+      store: SecurePermissionOnboardingStore(),
+      microphonePermissionService: DeviceMicrophonePermissionService(),
+      photoPermissionService: const DevicePhotoPermissionService(),
+      pushPermissionService: DevicePushPermissionService(),
+    ),
     guardianPinRepository: RemoteGuardianPinRepository(apiClient),
     authRepository: authRepository,
     activityRepository: RemoteActivityRepository(apiClient),

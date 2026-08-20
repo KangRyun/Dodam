@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -47,7 +49,9 @@ void main() {
       controller.beginQuestion(_question(10));
       expect(controller.optionsVisible, isFalse);
 
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      // 20ms 를 재고 30ms 를 자면 부하 걸린 CI 에서 타이머가 밀려 그대로 깨진다.
+      //   노출 알림을 구독해 도달 시점에 깨면 결정적이고 더 빠르다.
+      await _waitUntilVisible(controller);
       expect(controller.optionsVisible, isTrue);
     });
 
@@ -82,3 +86,21 @@ AiQuestion _question(int messageId) => AiQuestion(
   ttsAvailable: true,
   createdAt: DateTime(2026, 7, 23),
 );
+
+/// 선택지가 노출될 때까지 알림을 구독해 기다린다.
+/// 도달 못 하면 5초 뒤 명확히 실패한다 — 조용히 매달리지 않게.
+Future<void> _waitUntilVisible(AiQuestionSelectionController controller) {
+  if (controller.optionsVisible) return Future<void>.value();
+  final done = Completer<void>();
+  void check() {
+    if (!done.isCompleted && controller.optionsVisible) done.complete();
+  }
+
+  controller.addListener(check);
+  return done.future
+      .timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => throw TimeoutException('선택지가 노출되지 않았다'),
+      )
+      .whenComplete(() => controller.removeListener(check));
+}

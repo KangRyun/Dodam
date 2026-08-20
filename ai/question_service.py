@@ -1816,39 +1816,63 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         )
         return _reask_response(req, started)
 
-    # 아이가 그만하고 싶다고 말했으면 다음 질문을 만들지 않고 무엇을 그만할지 되묻는다
-    # (S15P11B209-938). 위기·인젝션 뒤에 두는 이유: "다 싫어, 그만할래"는 그만하기 의사일
-    # 수도 위기 신호일 수도 있다. 이 분기를 위기 검사 앞에 두면 위기 신호를 조용히 삼킨다.
-    # 되묻기에 말로 답한 확인이 먼저다(S15P11B209-951). 뒤에 두면 "응, 그만할래"가 아래
-    # _detect_stop_intent에 다시 걸려 같은 되묻기를 반복한다 — 950이 칩에서 고친 자가 트리거가
-    # 음성 경로로 되살아난다. 위기·인젝션보다는 뒤다(938과 같은 이유).
-    just_reasked = _last_reask_branch(req)
-    confirmed = _stop_confirmation_response(req, started, just_reasked)
-    if confirmed is not None:
-        # ⚠️ 아이 발화 원문은 남기지 않는다 — 대상 코드만.
+    # 새 그림이 붙어 재개된 턴이면 그만하기 해석을 **통째로** 건너뛴다.
+    #
+    # 이 턴을 부른 것은 아이의 말이 아니라 캔버스에 붙은 새 그림이다. 그래서 이력의 마지막
+    # 아이 발화는 이 턴에 대한 대답이 아니라 **이전 라운드의 잔여물**이다. 실기기에서 터진
+    # 경로가 정확히 이것이다 — 대화가 끝나기 직전 되묻기에 아이가 "응"이라고 답했는데 그
+    # 차례에 질문 상한 409가 나면서 확인이 소비되지 않은 채 대화가 끝났고, 아이가 그림을 더
+    # 그려 재개되자 _stop_confirmation_response가 그 묵은 "응"을 **지금 막 한 대답으로** 읽어
+    # 맺음말 + confirmedStopTarget을 돌려줬다. 앱은 그 신호를 보고 재개된 대화를 1초 만에
+    # 끝냈다(앱 동작은 설계대로다 — 틀린 것은 신호 쪽이다).
+    #
+    # 아이가 그림을 더 그렸다는 행동 자체가 이전 "그만할래"를 뒤집는다. 그러니 묵은 의사를
+    # 재생하지 않는 것이 맞다. 이력에서 옛 발화를 지우는 대신 **해석만** 끄는 이유: 발화는
+    # 질문 생성의 문맥으로 여전히 쓸모가 있고, 아래 안전 검사도 그 원문을 봐야 한다.
+    #
+    # 🔴 여기서 꺼지는 것은 **그만하기 의사 해석뿐이다.** 위기 감지·인젝션 검사는 이 분기보다
+    #    앞에 있어 이미 돌았고, 질문 안전 판정(_evaluate_safety)은 아래에서 그대로 돈다.
+    #    이 플래그에 다른 검사를 얹지 말 것 — 재개는 흔한 정상 경로라 여기 얹힌 예외는
+    #    사실상 상시 적용된다.
+    if req.resumed_by_new_drawing:
         logger.info(
-            "그만하기 확인(음성) — target=%s request_id=%s",
-            confirmed.confirmed_stop_target or "NARROWED",
+            "새 그림으로 재개된 턴 — 묵은 그만하기 의사 해석 생략: request_id=%s",
             request_id,
         )
-        return confirmed
+    else:
+        # 아이가 그만하고 싶다고 말했으면 다음 질문을 만들지 않고 무엇을 그만할지 되묻는다
+        # (S15P11B209-938). 위기·인젝션 뒤에 두는 이유: "다 싫어, 그만할래"는 그만하기 의사일
+        # 수도 위기 신호일 수도 있다. 이 분기를 위기 검사 앞에 두면 위기 신호를 조용히 삼킨다.
+        # 되묻기에 말로 답한 확인이 먼저다(S15P11B209-951). 뒤에 두면 "응, 그만할래"가 아래
+        # _detect_stop_intent에 다시 걸려 같은 되묻기를 반복한다 — 950이 칩에서 고친 자가 트리거가
+        # 음성 경로로 되살아난다. 위기·인젝션보다는 뒤다(938과 같은 이유).
+        just_reasked = _last_reask_branch(req)
+        confirmed = _stop_confirmation_response(req, started, just_reasked)
+        if confirmed is not None:
+            # ⚠️ 아이 발화 원문은 남기지 않는다 — 대상 코드만.
+            logger.info(
+                "그만하기 확인(음성) — target=%s request_id=%s",
+                confirmed.confirmed_stop_target or "NARROWED",
+                request_id,
+            )
+            return confirmed
 
-    # 방금 되물었는데 확인도 부정도 아닌 답이 왔으면 **같은 되묻기를 반복하지 않는다.**
-    # 반복하면 950이 칩에서 고친 자가 트리거가 음성 경로로 되살아나고, 계속 물으면
-    # 그만두라고 떠미는 것처럼 들린다(718과 같은 결). 평소 흐름으로 돌아가고, 아이가
-    # 다시 그만하겠다고 말하면 그때 새로 되묻는다.
-    stop_verdict = None if just_reasked else _detect_stop_intent(req)
-    if stop_verdict:
-        # ⚠️ 아이 발화 원문은 남기지 않는다 — 판정 코드만.
-        logger.info(
-            "그만하기 의사 감지 — 되묻기: verdict=%s activityType=%s request_id=%s",
-            stop_verdict or "-",
-            req.activity_type or "-",
-            request_id,
-        )
-        return _stop_intent_response(
-            req, started, stop_verdict or conversation_stop_intent.STOP_CONVERSATION
-        )
+        # 방금 되물었는데 확인도 부정도 아닌 답이 왔으면 **같은 되묻기를 반복하지 않는다.**
+        # 반복하면 950이 칩에서 고친 자가 트리거가 음성 경로로 되살아나고, 계속 물으면
+        # 그만두라고 떠미는 것처럼 들린다(718과 같은 결). 평소 흐름으로 돌아가고, 아이가
+        # 다시 그만하겠다고 말하면 그때 새로 되묻는다.
+        stop_verdict = None if just_reasked else _detect_stop_intent(req)
+        if stop_verdict:
+            # ⚠️ 아이 발화 원문은 남기지 않는다 — 판정 코드만.
+            logger.info(
+                "그만하기 의사 감지 — 되묻기: verdict=%s activityType=%s request_id=%s",
+                stop_verdict or "-",
+                req.activity_type or "-",
+                request_id,
+            )
+            return _stop_intent_response(
+                req, started, stop_verdict or conversation_stop_intent.STOP_CONVERSATION
+            )
 
     # 그림일기 완전 첫 질문은 GMS 없이 고정 문구로 연다(S15P11B209-921). 무엇을 그렸는지는
     # 아이만 아는 정보라 AI가 추측하지 않고 직접 묻는다. 위기·인젝션 검사 뒤에 두는 이유:

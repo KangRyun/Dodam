@@ -568,6 +568,10 @@ public record ObservationGenerationResult(
    * @param unknownItems 이번 활동에서 확인하지 못한 것이다. 서버가 원자료에서 정하며, 침묵 대신 이름을 돌려주기 위한 자리다 — 비어 나가면 보호자는
    *     '문제가 없었다'로 읽는다
    * @param dataQuality 근거가 무엇으로 이루어졌는지 알려 주는 구성 정보
+   * @param schemaVersion 그림일기 구조 버전
+   * @param dataScope V3 자료 범위와 집계이며 V2는 {@code null}
+   * @param storyComponents V3 이야기 지도 구성 요소
+   * @param drawingObservations V3 이미지 기반 관찰 사실
    */
   public record DiaryInsightsDraft(
       DiaryStorySnapshotDraft storySnapshot,
@@ -578,7 +582,11 @@ public record ObservationGenerationResult(
       String listeningTip,
       List<DiaryDevelopmentalObservationDraft> developmentalObservations,
       List<DiaryUnknownItemDraft> unknownItems,
-      DiaryDataQualityDraft dataQuality) {
+      DiaryDataQualityDraft dataQuality,
+      Integer schemaVersion,
+      DiaryDataScopeDraft dataScope,
+      List<DiaryStoryComponentDraft> storyComponents,
+      List<DiaryDrawingObservationDraft> drawingObservations) {
 
     /** 목록은 빈 목록으로 정규화한다. 배열이 비는 것은 '그 섹션을 숨긴다'는 정상 신호다. */
     public DiaryInsightsDraft {
@@ -589,6 +597,92 @@ public record ObservationGenerationResult(
       caregiverQuestions = caregiverQuestions == null ? List.of() : List.copyOf(caregiverQuestions);
       developmentalObservations =
           developmentalObservations == null ? List.of() : List.copyOf(developmentalObservations);
+      schemaVersion = schemaVersion == null ? 2 : schemaVersion;
+      storyComponents = storyComponents == null ? List.of() : List.copyOf(storyComponents);
+      drawingObservations =
+          drawingObservations == null ? List.of() : List.copyOf(drawingObservations);
+    }
+
+    /** 그림일기 V3 필드가 없던 AI 응답과 테스트 Fixture를 위한 호환 생성자다. */
+    public DiaryInsightsDraft(
+        DiaryStorySnapshotDraft storySnapshot,
+        List<DiaryNarrativeStepDraft> narrativeFlow,
+        List<DiaryChildVoiceItemDraft> childVoiceItems,
+        List<DiarySessionObservationDraft> sessionObservations,
+        List<DiaryCaregiverQuestionDraft> caregiverQuestions,
+        String listeningTip,
+        List<DiaryDevelopmentalObservationDraft> developmentalObservations,
+        List<DiaryUnknownItemDraft> unknownItems,
+        DiaryDataQualityDraft dataQuality) {
+      this(
+          storySnapshot,
+          narrativeFlow,
+          childVoiceItems,
+          sessionObservations,
+          caregiverQuestions,
+          listeningTip,
+          developmentalObservations,
+          unknownItems,
+          dataQuality,
+          2,
+          null,
+          List.of(),
+          List.of());
+    }
+  }
+
+  /**
+   * 그림일기 V3가 실제로 사용한 자료 범위를 보호자에게 설명하는 계약이다.
+   *
+   * @param evidenceLevel LIMITED·PARTIAL·RICH 중 하나
+   * @param summary 자료 범위를 설명하는 문장
+   * @param confirmedVoiceCount 확정된 아이 발화 수
+   * @param optionAnswerCount 선택형 답변 수
+   * @param skippedCount 건너뛴 질문 수
+   * @param sttConfirmationCount 확인이 필요한 STT 수
+   * @param visualObservationCount 검증된 그림 관찰 수
+   */
+  public record DiaryDataScopeDraft(
+      String evidenceLevel,
+      String summary,
+      int confirmedVoiceCount,
+      int optionAnswerCount,
+      int skippedCount,
+      int sttConfirmationCount,
+      int visualObservationCount) {}
+
+  /**
+   * 사건·행동·감정 등 이야기 지도 구성 요소 하나다.
+   *
+   * @param componentType 구성 요소 종류
+   * @param status CONFIRMED·VISUAL_ONLY·SELECTED·PARTIAL·UNKNOWN 중 하나
+   * @param text 확인된 내용이며 UNKNOWN이면 {@code null} 가능
+   * @param evidenceRefs 구성 요소를 뒷받침하는 근거 참조
+   */
+  public record DiaryStoryComponentDraft(
+      String componentType, String status, String text, List<DiaryEvidenceRefDraft> evidenceRefs) {
+
+    public DiaryStoryComponentDraft {
+      evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
+    }
+  }
+
+  /**
+   * 이미지에서 직접 확인한 사실 한 건이다.
+   *
+   * @param text 관찰 사실
+   * @param confidence HIGH·MODERATE·LOW 중 하나
+   * @param childConfirmed 아이 발화로도 확인됐는지 여부
+   * @param evidenceRefs 관찰을 뒷받침하는 이미지 근거 참조
+   */
+  public record DiaryDrawingObservationDraft(
+      String text,
+      String confidence,
+      boolean childConfirmed,
+      List<DiaryEvidenceRefDraft> evidenceRefs) {
+
+    public DiaryDrawingObservationDraft {
+      evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
     }
   }
 
@@ -690,13 +784,13 @@ public record ObservationGenerationResult(
   /**
    * "오늘 마음 나누기" 교감 카드다. 보호자가 아이와 정서적 교감을 나누도록 감정 앵커 질문과 함께 아이 답에 부모가 마음으로 반응하는 법을 담는다.
    *
-   * <p>{@code responseGuide}·{@code coRegulationAction} 은 AI 서버가 {@code connectionType} 으로 정적 매핑한 값이며 LLM 이
-   * 만들지 않는다.
+   * <p>{@code responseGuide}·{@code coRegulationAction} 은 AI 서버가 {@code connectionType} 으로 정적 매핑한
+   * 값이며 LLM 이 만들지 않는다.
    *
    * @param question 감정 앵커 질문 한 문장
    * @param purpose 이 질문으로 더 들어볼 내용
-   * @param connectionType 교감 유형({@code FEELING_SHARING}·{@code COMFORT_SEEKING}·{@code SHARED_JOY}·{@code
-   *     PERSPECTIVE_TAKING}·{@code GENERAL_CONNECTION})
+   * @param connectionType 교감 유형({@code FEELING_SHARING}·{@code COMFORT_SEEKING}·{@code
+   *     SHARED_JOY}·{@code PERSPECTIVE_TAKING}·{@code GENERAL_CONNECTION})
    * @param responseGuide 아이 답에 부모가 마음으로 반응하는 법이며 없으면 {@code null}
    * @param coRegulationAction 함께 해보기 한 줄이며 없으면 {@code null}
    * @param evidenceRefs 이 질문이 이어지는 근거 식별자

@@ -40,6 +40,12 @@ IMAGE="${BUILDER_IMAGE:-dodam-flutter-builder:3.44.7}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/build-artifacts}"
 GRADLE_CACHE_VOLUME="${GRADLE_CACHE_VOLUME:-dodam-android-gradle}"
 PUB_CACHE_VOLUME="${PUB_CACHE_VOLUME:-dodam-android-pub}"
+CACHE_SCOPE_RAW="${CACHE_SCOPE:-${JOB_NAME:-local}-${BUILD_FORMAT}}"
+CACHE_SCOPE="$(printf '%s' "$CACHE_SCOPE_RAW" | tr -cs '[:alnum:]_.-' '-' | cut -c1-48)"
+DART_TOOL_CACHE_VOLUME="${DART_TOOL_CACHE_VOLUME:-dodam-flutter-dart-tool-${CACHE_SCOPE}}"
+BUILD_CACHE_VOLUME="${BUILD_CACHE_VOLUME:-dodam-flutter-release-build-${CACHE_SCOPE}}"
+ANDROID_PROJECT_CACHE_VOLUME="${ANDROID_PROJECT_CACHE_VOLUME:-dodam-flutter-android-project-${CACHE_SCOPE}}"
+ANDROID_APP_BUILD_VOLUME="${ANDROID_APP_BUILD_VOLUME:-dodam-flutter-android-app-build-${CACHE_SCOPE}}"
 
 # 릴리스 서명 자재. 없으면 debug 키로 서명된 산출물이 나오는데 그건 스토어에 올릴 수 없다.
 #   → CI 에서는 REQUIRE_RELEASE_SIGNING=true 로 두어 조용한 debug 서명을 금지한다.
@@ -158,13 +164,20 @@ CID="$(docker create \
   -e "LEGAL_WEB_URL=${LEGAL_WEB_URL:-}" \
   -v "${GRADLE_CACHE_VOLUME}:/root/.gradle" \
   -v "${PUB_CACHE_VOLUME}:/root/.pub-cache" \
+  -v "${DART_TOOL_CACHE_VOLUME}:/src/.dart_tool" \
+  -v "${BUILD_CACHE_VOLUME}:/src/build" \
+  -v "${ANDROID_PROJECT_CACHE_VOLUME}:/src/android/.gradle" \
+  -v "${ANDROID_APP_BUILD_VOLUME}:/src/android/app/build" \
   "$IMAGE" \
   bash /src/ci-build.sh)"
 
 # ── 2. 소스·서명자재 주입 ──────────────────────────────────────────────────
-log "소스 주입 (docker cp — bind mount 아님)"
-# frontend/mobile 의 **내용물**을 /src 로 넣는다. `.../mobile/.` 의 마침표가 그 의미다.
-docker cp "$REPO_ROOT/frontend/mobile/." "$CID:/src/"
+log "소스 주입 (호스트 산출물 제외 · docker cp 스트림)"
+# named volume의 증분 캐시 위에 소스만 얹는다. 호스트의 SDK 경로와 산출물은 섞지 않는다.
+tar -C "$REPO_ROOT/frontend/mobile" \
+  --exclude='./build' --exclude='./.dart_tool' \
+  --exclude='./android/.gradle' --exclude='./android/app/build' \
+  -cf - . | docker cp - "$CID:/src/"
 docker cp "$REPO_ROOT/infra/mobile/ci-build.sh" "$CID:/src/ci-build.sh"
 
 if [ -n "$KEYSTORE_FILE" ] && [ -f "$KEYSTORE_FILE" ]; then

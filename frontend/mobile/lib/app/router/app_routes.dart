@@ -1,6 +1,13 @@
 abstract final class AppRoutes {
   static const String authBootstrap = '/auth/bootstrap';
   static const String login = '/auth/login';
+
+  /// 로그인 직후 한 번만 세우는 권한 안내(마이크·카메라·알림).
+  ///
+  /// 보호자 착지점(프로필 선택·보호자 홈) **앞**에 끼워 넣는다. 보호자 홈
+  /// 라우트에 걸면 PIN gate와 같은 자리를 다투므로 라우트를 따로 둔다.
+  static const String permissionOnboarding = '/auth/permissions';
+
   static const String profileSelection = '/profiles/select';
   static const String expertProfile = '/expert/profile';
   static const String guardianHome = '/guardian/home';

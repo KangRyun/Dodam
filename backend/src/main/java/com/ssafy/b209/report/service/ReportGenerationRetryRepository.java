@@ -158,21 +158,38 @@ public class ReportGenerationRetryRepository {
    * 될 것처럼 계속 보인다.
    *
    * @param maxAttempts 포기 기준이 되는 시도 횟수
-   * @return 포기 처리한 건수
+   * @return 포기 처리한 리포트 식별자 목록이며 없으면 빈 목록
    */
   @Transactional
-  public int abandonExhausted(int maxAttempts) {
-    int abandoned =
-        jdbcTemplate.update(
+  public List<Long> abandonExhausted(int maxAttempts) {
+    // 갱신 전에 대상 식별자를 먼저 읽는다. 보호자에게 "리포트를 만들지 못했어요"를 보내려면 어느
+    //   리포트인지가 필요한데, 아래 벌크 UPDATE 는 건수만 돌려주고 어떤 행이었는지는 잃는다.
+    // ⚠️ for update 가 핵심이다. 워커가 두 벌 돌므로(클래스 javadoc) 잠그지 않으면 두 파드가 같은
+    //   행을 함께 읽어, 상태는 한 번만 바뀌는데 보호자는 같은 실패 알림을 두 번 받는다. 잠그면 뒤에
+    //   온 쪽은 커밋을 기다렸다가 이미 FAILED_FINAL 이 된 행을 보고 빈 목록을 얻는다.
+    List<Long> abandonedReportIds =
+        jdbcTemplate.queryForList(
             """
-            update reports report
+            select report.id
+              from reports report
               join report_generation_retries queued on queued.report_id = report.id
-               set report.report_status = 'FAILED_FINAL'
              where queued.resolved_at is null
                and queued.attempt_count >= ?
                and report.report_status = 'FAILED_RETRYABLE'
+             for update
             """,
+            Long.class,
             maxAttempts);
+    jdbcTemplate.update(
+        """
+        update reports report
+          join report_generation_retries queued on queued.report_id = report.id
+           set report.report_status = 'FAILED_FINAL'
+         where queued.resolved_at is null
+           and queued.attempt_count >= ?
+           and report.report_status = 'FAILED_RETRYABLE'
+        """,
+        maxAttempts);
     jdbcTemplate.update(
         """
         update report_generation_retries
@@ -181,6 +198,6 @@ public class ReportGenerationRetryRepository {
            and attempt_count >= ?
         """,
         maxAttempts);
-    return abandoned;
+    return abandonedReportIds;
   }
 }

@@ -10,6 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test:unit": "node --test tests/unit/*.test.mjs",
+    "test:image-optimizer-smoke": "node tests/integration/image-optimizer-standalone-smoke.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -19,6 +21,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.71.0",
+    "sharp": "0.34.5",
     "zod": "^4.3.0",
     "zustand": "^5.0.0"
   },

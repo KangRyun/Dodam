@@ -60,6 +60,35 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    testWidgets('그림일기는 건너뛰기 뒤 새 그림 분석 전까지 다음 질문을 요청하지 않는다', (tester) async {
+      final conversations = _ConversationRepository();
+      await _pumpConversation(
+        tester,
+        conversationRepository: conversations,
+        activityContext: const DrawingActivityContextDto.general(),
+      );
+      final callsBeforeSkip = conversations.questionConversationIds.length;
+
+      await _tap(tester, const ValueKey('ai-question-skip'));
+      await tester.pumpAndSettle();
+
+      expect(conversations.questionConversationIds, hasLength(callsBeforeSkip));
+    });
+
+    testWidgets('HTP는 건너뛰기 뒤 같은 그림의 다음 질문을 계속 요청한다', (tester) async {
+      final conversations = _ConversationRepository();
+      await _pumpConversation(tester, conversationRepository: conversations);
+      final callsBeforeSkip = conversations.questionConversationIds.length;
+
+      await _tap(tester, const ValueKey('ai-question-skip'));
+      await tester.pumpAndSettle();
+
+      expect(
+        conversations.questionConversationIds,
+        hasLength(callsBeforeSkip + 1),
+      );
+    });
+
     testWidgets('제출이 끝나면 진행 표시를 걷는다', (tester) async {
       final answers = _AnswerRepository(failure: _failure(500));
       await _pumpConversation(tester, answerRepository: answers);

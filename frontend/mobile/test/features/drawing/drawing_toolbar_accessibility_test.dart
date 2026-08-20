@@ -406,30 +406,24 @@ void main() {
       },
     );
 
-    testWidgets('eraser menu exposes only stroke, area, and clear callbacks', (
+    testWidgets('eraser activates directly without opening a mode menu', (
       tester,
     ) async {
-      final actions = <DrawingEraserMenuAction>[];
+      final instruments = <DrawingInstrument>[];
       await _pumpToolbar(
         tester,
         quickColors: quickColors,
-        onEraserMenuAction: actions.add,
+        onInstrumentChanged: instruments.add,
       );
 
       await tester.tap(find.byKey(const ValueKey('drawing-tool-eraser')));
       await tester.pumpAndSettle();
 
-      expect(
-        find.byType(PopupMenuItem<DrawingEraserMenuAction>),
-        findsNWidgets(3),
-      );
-      expect(find.text('선 지우개'), findsOneWidget);
-      expect(find.text('영역 지우개'), findsOneWidget);
-      expect(find.text('전체 지우기'), findsOneWidget);
-
-      await tester.tap(find.text('전체 지우기'));
-      await tester.pumpAndSettle();
-      expect(actions, [DrawingEraserMenuAction.clearAll]);
+      expect(instruments, [DrawingInstrument.eraser]);
+      expect(find.byType(PopupMenuItem), findsNothing);
+      expect(find.text('선 지우개'), findsNothing);
+      expect(find.text('영역 지우개'), findsNothing);
+      expect(find.text('전체 지우기'), findsNothing);
     });
 
     testWidgets('failed save status exposes one fixed retry action', (
@@ -563,7 +557,6 @@ Future<void> _pumpToolbar(
   Size size = const Size(1194, 834),
   double textScale = 1,
   bool disableAnimations = false,
-  ValueChanged<DrawingEraserMenuAction>? onEraserMenuAction,
   VoidCallback? onBack,
   VoidCallback? onUndo,
   ValueChanged<DrawingInstrument>? onInstrumentChanged,
@@ -603,7 +596,6 @@ Future<void> _pumpToolbar(
             onRedo: () {},
             onRetrySave: onRetrySave ?? () {},
             onInstrumentChanged: onInstrumentChanged ?? (_) {},
-            onEraserMenuAction: onEraserMenuAction ?? (_) {},
             onColorChanged: onColorChanged ?? (_) {},
             onWidthChanged: (_) {},
             onOpenPalette: () {},

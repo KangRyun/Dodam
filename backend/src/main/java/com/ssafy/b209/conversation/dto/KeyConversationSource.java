@@ -1,5 +1,7 @@
 package com.ssafy.b209.conversation.dto;
 
+import java.time.LocalDateTime;
+
 /** 리포트 대표 대화를 구성하기 위해 조회한 질문·답변 메시지 원본이다. */
 public interface KeyConversationSource {
 
@@ -37,4 +39,24 @@ public interface KeyConversationSource {
    * @return 보호자 확인이 필요하면 {@code true}
    */
   boolean getAnswerNeedsGuardianConfirmation();
+
+  /**
+   * @return 음성 답변의 STT 처리 상태이며 음성 답변이 아니면 {@code null}
+   */
+  String getAnswerSpeechStatus();
+
+  /**
+   * MySQL native query가 반환하는 원본 음성 저장 참조 여부를 숫자 플래그로 제공한다.
+   *
+   * <p>native query의 {@code CASE} 결과는 JDBC에서 {@link Integer}로 반환되므로, projection 단계에서
+   * {@code boolean}으로 직접 변환하지 않는다.
+   *
+   * @return 원본 음성 저장 참조가 있으면 {@code 1}, 없으면 {@code 0}
+   */
+  Integer getAnswerAudioAvailable();
+
+  /**
+   * @return 답변 메시지가 생성된 서버 시각
+   */
+  LocalDateTime getAnswerCreatedAt();
 }

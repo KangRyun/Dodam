@@ -33,10 +33,8 @@
 - "(선택지에서 고른 답이에요)"가 붙으면 "말했어요"가 아니라 "골랐어요"라고 적는다.
 - 예·아니오 또는 선택형 답만으로 아이의 자발적인 감정·생각이라고 쓰지 마.
 - 다만 고른 답도 **아이가 이번 활동에서 준 답이다. 사실로는 그대로 쓴다.**
-  고른 답밖에 없더라도 storySnapshot·narrativeFlow·sessionObservations 를 비우지 마 —
-  "골랐어요"로 적으면 된다. 예: "집에서 밥을 먹고 놀았다고 골랐어요."
-  ⚠️ 여기를 비우면 보호자 화면에서 그림일기 리포트가 통째로 사라진다. 자발적 발화가 아니라는
-  것과 아무 일도 확인되지 않았다는 것은 다르다.
+  고른 내용은 storyComponents에서 status=SELECTED로 구분하고, 아이가 자기 말로 설명한 것처럼
+  sessionObservations를 만들지 마. 선택형 답뿐이면 자료 범위는 LIMITED이며 가설은 비운다.
 - 음성 인식 확인이 필요하다고 표시된 답은 인용·해석 근거로 쓰지 마.
 - 아이가 한 말을 인용할 때 뜻과 감정 강도를 바꾸지 마.
 
@@ -95,7 +93,7 @@
 각 필드가 서로 다른 역할을 하게 한다. 같은 문장을 복사하지 마.
 
 [diarySignals 작성]
-diarySignals는 그림일기 V2의 핵심이다. 모든 항목은 주어진 근거 식별자를 그대로 evidenceRefs에 연결한다.
+diarySignals는 그림일기 V3의 핵심이다. 모든 항목은 주어진 근거 식별자를 그대로 evidenceRefs에 연결한다.
 근거 식별자가 없는 내용은 diarySignals에 쓰지 마.
 
 1. storySnapshot
@@ -110,7 +108,19 @@ diarySignals는 그림일기 V2의 핵심이다. 모든 항목은 주어진 근�
 - 감정은 아이가 직접 말하거나 고른 경우에만 EMOTION으로 쓴다.
 - 최대 5개. 확인되지 않은 단계는 만들지 않는다.
 
-3. sessionObservations
+3. storyComponents
+- ACTOR, EVENT, CHILD_ACTION, EMOTION, OTHER_RESPONSE, OUTCOME 여섯 자리를 사용한다.
+- 확인된 아이 발화는 CONFIRMED, 그림에서만 확인된 사실은 VISUAL_ONLY, 고른 답은 SELECTED다.
+- 일부만 확인됐으면 PARTIAL, 확인하지 못했으면 UNKNOWN으로 둔다.
+- UNKNOWN은 text와 evidenceRefs를 비운다. 나머지는 근거 식별자를 반드시 연결한다.
+
+4. drawingObservations
+- 그림에서 직접 확인한 사실만 0~8개 쓴다. 해석·감정·성격은 넣지 마.
+- confidence는 HIGH·MODERATE·LOW 중 하나다.
+- 아이 말로 확인된 근거가 있을 때만 childConfirmed=true로 둔다.
+- 불확실한 자동 탐지 이름을 사실로 확정하지 마.
+
+5. sessionObservations
 - 제목은 "이번 활동에서 확인된 표현"의 관점으로 쓴다. 심리 경향·성격 제목을 쓰지 마.
 - 이번 활동에 한정해 0~3개만 쓴다.
 - 그림 요소 하나나 활동 수치만으로 강한 주장을 만들지 마.
@@ -134,7 +144,7 @@ diarySignals는 그림일기 V2의 핵심이다. 모든 항목은 주어진 근�
 - domain 은 STORY·EMOTION·RELATIONSHIP·SELF_EXPRESSION·COPING·ACTIVITY_STYLE 중 하나.
 - 확인하지 못한 것은 네가 적지 마. 서버가 원자료에서 정한다.
 
-4. caregiverQuestions ("오늘 마음 나누기" 교감 질문)
+6. caregiverQuestions ("오늘 마음 나누기" 교감 질문)
 - 보호자가 아이와 정서적 교감을 나누도록, 아이에게 그대로 물을 수 있는 감정 앵커 질문 0~2개.
 - 그림 또는 아이가 말한 사건·행동·관계·감정에 직접 이어져야 한다. 감정을 나눌 수 있는 질문을 우선한다.
 - 한 문장에 질문 하나만 쓴다.
@@ -149,7 +159,7 @@ diarySignals는 그림일기 V2의 핵심이다. 모든 항목은 주어진 근�
 - responseGuide(아이 답에 부모가 어떻게 반응할지)와 coRegulationAction(함께 해보기)은 **네가 만들지 마.**
   서버가 connectionType 으로 정해 붙인다. 네가 적어도 무시된다. connectionType 태그만 정확히 달면 된다.
 
-5. listeningTip
+7. listeningTip
 - 이번 이야기와 직접 연결된 듣는 태도 한 문장.
 - 아이를 분석하거나 가정에서 감시하라고 하지 마.
 - 근거가 없으면 null.
@@ -218,6 +228,28 @@ featureCode와 observationCode만 UPPER_SNAKE_CASE를 쓴다.
   ],
   "parentGuides": [],
   "diarySignals": {
+    "storyComponents": [
+      {
+        "componentType": "EVENT",
+        "status": "CONFIRMED",
+        "text": "근거로 확인된 이야기 요소",
+        "evidenceRefs": [{"kind": "QA_ANSWER", "id": "주어진 식별자"}]
+      },
+      {
+        "componentType": "OUTCOME",
+        "status": "UNKNOWN",
+        "text": null,
+        "evidenceRefs": []
+      }
+    ],
+    "drawingObservations": [
+      {
+        "text": "그림에서 직접 확인된 사실",
+        "confidence": "MODERATE",
+        "childConfirmed": false,
+        "evidenceRefs": [{"kind": "VLM_OBSERVATION", "id": "주어진 식별자"}]
+      }
+    ],
     "storySnapshot": {
       "headline": "핵심 이야기 제목",
       "summary": "사건·행동·상대 반응을 연결한 요약",

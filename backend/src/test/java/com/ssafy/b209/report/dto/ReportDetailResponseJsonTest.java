@@ -76,6 +76,47 @@ class ReportDetailResponseJsonTest {
         .doesNotContain("EXPERT_ONLY");
   }
 
+  @Test
+  void serializesVoiceTranscriptWithStableProxyUrl() throws Exception {
+    ReportDiaryInsightsResponse insights =
+        new ReportDiaryInsightsResponse(
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            null,
+            3,
+            new ReportDiaryInsightsResponse.DiaryDataScopeResponse(
+                "RICH", "확정된 발화와 그림 관찰을 함께 사용했어요.", 3, 0, 0, 0, 2),
+            List.of(),
+            List.of(),
+            List.of(
+                new ReportDiaryInsightsResponse.DiaryTranscriptEntryResponse(
+                    11L,
+                    22L,
+                    "누구와 함께 있었어?",
+                    "친구와 있었어요",
+                    "VOICE",
+                    "SUCCESS",
+                    null,
+                    true,
+                    "/api/v1/conversation-messages/22/audio",
+                    "OPEN_INVITATION",
+                    LocalDateTime.parse("2026-08-09T10:15:00"))));
+
+    ObjectNode node = (ObjectNode) objectMapper.readTree(objectMapper.writeValueAsString(insights));
+
+    assertThat(node.get("schemaVersion").asInt()).isEqualTo(3);
+    assertThat(node.get("transcript").get(0).get("answerMessageId").asLong()).isEqualTo(22L);
+    assertThat(node.get("transcript").get(0).get("audioUrl").asText())
+        .isEqualTo("/api/v1/conversation-messages/22/audio");
+    assertThat(node.get("transcript").get(0).get("audioAvailable").asBoolean()).isTrue();
+  }
+
   private ReportDetailResponse sample() {
     return new ReportDetailResponse(
         500L,

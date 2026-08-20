@@ -52,7 +52,23 @@ public record AiQuestionRequest(
      * <p>주제마다 대화 세션이 따로 열려 다음 주제는 앞 주제의 발화를 모른다 — 그 단절을 잇는
      * 압축 재료다. 질문은 싣지 않고 아이 답만 싣는다. 첫 주제·그림일기는 빈 목록이다.
      */
-    List<PreviousSubjectNote> previousSubjectNotes) {
+    List<PreviousSubjectNote> previousSubjectNotes,
+    /**
+     * 이 턴을 아이 발화가 아니라 <b>새 그림이 촉발했는지</b> 여부다 (끝난 그림일기 대화의 재개 턴).
+     *
+     * <p>재개 턴에서 AI는 대화 이력을 처음부터 다시 읽는데, 거기엔 상한 도달로 <b>처리되지 못한 채 남은 마지막 답</b>이 그대로 들어 있다. 그것을 지금 한
+     * 대답으로 읽으면 옛 "그만할래"에 맺음말과 종료 확인 신호({@code confirmedStopTarget})를 돌려주고, FE는 그 신호를 받아 방금 다시 연 대화를
+     * 즉시 닫는다(실측: 재개 1초 뒤 종료). 아이가 그림을 더 그렸다는 사실 자체가 이전 종료 의사를 뒤집는 행동이므로, 재개 턴에서는 묵은 의사를 재생하지 않도록
+     * AI에 알린다.
+     *
+     * <p>⚠️ "재개가 허용됐다"와 같은 말이 아니다. 재개 가능한 상태에서도 아이가 방금 답을 남긴 턴이면 {@code false}다 — 그 턴을 부른 것은 그림이
+     * 아니라 아이의 말이고, 켜 두면 AI가 방금 들어온 진짜 "그만할래"를 묵은 의사로 흘려버린다. 조합 조건은 {@code
+     * ConversationQuestionService.resumedByNewDrawing}에 있다.
+     *
+     * <p>AI 쪽(Python)은 {@code resumed_by_new_drawing}으로 받으며 기본값은 {@code false}다. 일반 진행 중 대화도 {@code
+     * false}다.
+     */
+    boolean resumedByNewDrawing) {
 
   /**
    * 앞 주제 하나의 노트다 (S15P11B209-989).

@@ -136,6 +136,14 @@ class QuestionRequest(_CamelModel):
     # 앞 주제에서 아이가 한 말 (S15P11B209-989). 롤아웃 안전: 구 BE가 안 보내면 빈 목록 —
     #   첫 주제·그림일기와 같은 경로로 떨어져 기존 동작 그대로다.
     previous_subject_notes: list[PreviousSubjectNote] = Field(default_factory=list)
+    # 이 요청이 **아이 발화가 아니라 새 그림이 붙어서** 촉발됐는가(그림일기 대화 재개).
+    #   True면 recentMessages의 마지막 아이 발화는 **이 턴에 대한 대답이 아니라 이전 라운드의
+    #   잔여물**이다. 그만하기 되묻기에 답한 "응"이 질문 상한 409로 소비되지 못한 채 남아 있다가
+    #   재개 턴에서 종료 확인으로 재생돼, 재개된 대화가 1초 만에 다시 끝나는 사고가 있었다.
+    #   ⚠️ 이 플래그는 **그만하기 의사 해석만** 무력화한다. 위기 감지·인젝션 검사·질문 안전
+    #      판정은 그대로 돈다(question_service.generate 참고).
+    #   롤아웃 안전: 구 BE가 안 보내면 False — 기존 동작 그대로다.
+    resumed_by_new_drawing: bool = False
 
     @model_validator(mode="after")
     def validate_activity_context(self) -> "QuestionRequest":
@@ -906,12 +914,49 @@ class DiaryDataQuality(_CamelModel):
     vision_summary_available: bool = False
 
 
-class DiaryInsights(_CamelModel):
-    """그림일기 전용 보호자 리포트 V2.
+class DiaryDataScope(_CamelModel):
+    """보호자에게 공개할 이번 회차 원자료의 범위와 해석 상한."""
 
-    전부 optional 확장이라 구 BE는 무시할 수 있다. HTP 응답에서는 None 이다.
+    evidence_level: Literal["LIMITED", "PARTIAL", "RICH"]
+    summary: str
+    confirmed_voice_count: int = 0
+    option_answer_count: int = 0
+    skipped_count: int = 0
+    stt_confirmation_count: int = 0
+    visual_observation_count: int = 0
+
+
+class DiaryDrawingObservation(_CamelModel):
+    """그림에서 직접 확인한 시각적 사실과 그 근거."""
+
+    text: str
+    confidence: Literal["HIGH", "MODERATE", "LOW"] = "MODERATE"
+    child_confirmed: bool = False
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryStoryComponent(_CamelModel):
+    """사건 흐름의 한 요소와 그 확인 상태."""
+
+    component_type: Literal[
+        "ACTOR", "EVENT", "CHILD_ACTION", "EMOTION", "OTHER_RESPONSE", "OUTCOME"
+    ]
+    status: Literal["CONFIRMED", "VISUAL_ONLY", "SELECTED", "PARTIAL", "UNKNOWN"]
+    text: str | None = None
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryInsights(_CamelModel):
+    """그림일기 전용 보호자 리포트.
+
+    ``schema_version``이 없던 기존 응답은 V2로 읽는다. V3는 자료 범위와 그림 관찰을
+    추가하지만 HTP 응답에서는 계속 ``None``이다.
     """
 
+    schema_version: int = 2
+    data_scope: DiaryDataScope | None = None
+    story_components: list[DiaryStoryComponent] = Field(default_factory=list)
+    drawing_observations: list[DiaryDrawingObservation] = Field(default_factory=list)
     story_snapshot: DiaryStorySnapshot | None = None
     narrative_flow: list[DiaryNarrativeStep] = Field(default_factory=list)
     child_voice_items: list[DiaryChildVoiceItem] = Field(default_factory=list)
